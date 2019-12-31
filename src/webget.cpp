@@ -5,6 +5,8 @@
 
 #include "webget.h"
 
+extern bool print_debug_info;
+
 std::string user_agent_str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36";
 
 static int writer(char *data, size_t size, size_t nmemb, std::string *writerData)
@@ -26,7 +28,7 @@ std::string curlGet(std::string url, std::string proxy)
 
     curl_handle = curl_easy_init();
     curl_easy_setopt(curl_handle, CURLOPT_URL, url.data());
-    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 0L);
+    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, print_debug_info ? 1L : 0L);
     curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -71,7 +73,7 @@ int curlPost(std::string url, std::string data, std::string proxy, std::string a
         list = curl_slist_append(list, std::string("Authorization: token " + auth_token).data());
 
     curl_easy_setopt(curl_handle, CURLOPT_URL, url.data());
-    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 0L);
+    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, print_debug_info ? 1L : 0L);
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
@@ -80,8 +82,8 @@ int curlPost(std::string url, std::string data, std::string proxy, std::string a
     curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
-	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writer);
-	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, retData);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writer);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, retData);
     curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, user_agent_str.data());
     if(proxy != "")
@@ -115,7 +117,7 @@ int curlPatch(std::string url, std::string data, std::string proxy, std::string 
         list = curl_slist_append(list, std::string("Authorization: token " + auth_token).data());
 
     curl_easy_setopt(curl_handle, CURLOPT_URL, url.data());
-    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 0L);
+    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, print_debug_info ? 1L : 0L);
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, "PATCH");
@@ -124,8 +126,8 @@ int curlPatch(std::string url, std::string data, std::string proxy, std::string 
     curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
-	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writer);
-	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, retData);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writer);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, retData);
     curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, user_agent_str.data());
     if(proxy != "")
