@@ -46,13 +46,15 @@ std::string regReplace(std::string src, std::string match, std::string rep);
 bool regMatch(std::string src, std::string match);
 std::string speedCalc(double speed);
 std::string getMD5(std::string data);
-bool isIPv4(std::string address);
-bool isIPv6(std::string address);
+bool isIPv4(std::string &address);
+bool isIPv6(std::string &address);
 void urlParse(std::string url, std::string &host, std::string &path, int &port, bool &isTLS);
 void removeUTF8BOM(std::string &data);
 int shortAssemble(unsigned short num_a, unsigned short num_b);
 void shortDisassemble(int source, unsigned short &num_a, unsigned short &num_b);
 int to_int(std::string &s, int def_vaule = 0);
+std::string UTF8ToCodePoint(std::string data);
+std::string GetEnv(std::string name);
 
 std::string fileGet(std::string path, bool binary = true);
 int fileWrite(std::string path, std::string content, bool overwrite);
@@ -66,25 +68,28 @@ static inline bool strFind(std::string str, std::string target)
     return str.find(target) != str.npos;
 }
 
+template <typename T> static inline void eraseElements(std::vector<T> &target)
+{
+    target.clear();
+    target.shrink_to_fit();
+}
+
 template <typename T> static inline void eraseElements(T &target)
 {
     T().swap(target);
 }
 
-#ifdef _MACOS
+#ifndef HAVE_TO_STRING
 namespace std
 {
-    namespace __cxx11
+    template <typename T> std::string to_string(const T& n)
     {
-        template <typename T> std::string to_string(const T& n)
-        {
-            std::ostringstream ss;
-            ss << n;
-            return ss.str();
-        }
+        std::ostringstream ss;
+        ss << n;
+        return ss.str();
     }
 }
-#endif // _MACOS
+#endif // HAVE_TO_STRING
 
 #ifdef _WIN32
 void StringToWstring(std::wstring& szDst, std::string str);

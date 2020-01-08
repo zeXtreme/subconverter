@@ -12,20 +12,23 @@ struct ruleset_content
 
 struct extra_settings
 {
+    bool enable_rule_generator = true;
     bool add_emoji = false;
     bool remove_emoji = false;
-    bool append_proxy_type = true;
+    bool append_proxy_type = false;
     bool udp = false;
     bool tfo = false;
     bool nodelist = false;
     bool sort_flag = false;
+    bool skip_cert_verify = false;
+    bool filter_deprecated = false;
     std::string surge_ssr_path;
 };
 
 void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset_content_array);
 void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_content_array, int surge_ver);
 std::string netchToClash(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, bool clashR, extra_settings &ext);
-YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &base, string_array &extra_proxy_group, bool clashR, extra_settings &ext);
+void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &base, string_array &extra_proxy_group, bool clashR, extra_settings &ext);
 std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, int surge_ver, extra_settings &ext);
 std::string netchToMellow(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);

@@ -33,8 +33,6 @@
 #include <sys/socket.h>
 #endif // _WIN32
 
-using namespace std::__cxx11;
-
 void sleep(int interval)
 {
     /*
@@ -318,6 +316,21 @@ std::vector<std::string> split(const std::string &s, const std::string &seperato
         }
     }
     return result;
+}
+
+std::string GetEnv(std::string name)
+{
+    std::string retVal;
+#ifdef _WIN32
+    char chrData[1024] = {};
+    if(GetEnvironmentVariable(name.c_str(), chrData, 1023))
+        retVal.assign(chrData);
+#else
+    char *env = getenv(name.c_str());
+    if(env != NULL)
+        retVal.assign(env);
+#endif // _WIN32
+    return retVal;
 }
 
 std::string getSystemProxy()
@@ -689,12 +702,12 @@ int fileWrite(std::string path, std::string content, bool overwrite)
     return 0;
 }
 
-bool isIPv4(std::string address)
+bool isIPv4(std::string &address)
 {
     return regMatch(address, "^(25[0-5]|2[0-4]\\d|[0-1]?\\d?\\d)(\\.(25[0-5]|2[0-4]\\d|[0-1]?\\d?\\d)){3}$");
 }
 
-bool isIPv6(std::string address)
+bool isIPv6(std::string &address)
 {
     std::vector<std::string> regLists = {"^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$", "^((?:[0-9A-Fa-f]{1,4}(:[0-9A-Fa-f]{1,4})*)?)::((?:([0-9A-Fa-f]{1,4}:)*[0-9A-Fa-f]{1,4})?)$", "^(::(?:[0-9A-Fa-f]{1,4})(?::[0-9A-Fa-f]{1,4}){5})|((?:[0-9A-Fa-f]{1,4})(?::[0-9A-Fa-f]{1,4}){5}::)$"};
     for(unsigned int i = 0; i < regLists.size(); i++)
@@ -934,4 +947,34 @@ std::string getFormData(const std::string &raw_data)
         i++;
     }
     return file;
+}
+
+std::string UTF8ToCodePoint(std::string data)
+{
+    std::stringstream ss;
+    int charcode = 0;
+    for(std::string::size_type i = 0; i < data.size(); i++)
+    {
+        charcode = data[i] & 0xff;
+        if((charcode >> 7) == 0)
+        {
+            ss<<data[i];
+        }
+        else if((charcode >> 5) == 6)
+        {
+            ss<<"\\u"<<std::hex<<((data[i + 1] & 0x3f) | (data[i] & 0x1f) << 6);
+            i++;
+        }
+        else if((charcode >> 4) == 14)
+        {
+            ss<<"\\u"<<std::hex<<((data[i + 2] & 0x3f) | (data[i + 1] & 0x3f) << 6 | (data[i] & 0xf) << 12);
+            i += 2;
+        }
+        else if((charcode >> 3) == 30)
+        {
+            ss<<"\\u"<<std::hex<<((data[i + 3] & 0x3f) | (data[i + 2] & 0x3f) << 6 | (data[i + 1] & 0x3f) << 12 | (data[i] & 0x7) << 18);
+            i += 3;
+        }
+    }
+    return ss.str();
 }

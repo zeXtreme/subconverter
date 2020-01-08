@@ -21,6 +21,9 @@ extern bool add_emoji, remove_old_emoji;
 extern bool api_mode;
 extern string_array ss_ciphers, ssr_ciphers;
 
+string_array clashr_protocols = {"auth_aes128_md5", "auth_aes128_sha1"};
+string_array clashr_obfs = {"plain", "http_simple", "http_post", "tls1.2_ticket_auth"};
+
 /*
 std::string hostnameToIPAddr(std::string host)
 {
@@ -482,7 +485,7 @@ void groupGenerate(std::string &rule, std::vector<nodeInfo> &nodelist, std::vect
     }
 }
 
-YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_array &extra_proxy_group, bool clashR, extra_settings &ext)
+void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_array &extra_proxy_group, bool clashR, extra_settings &ext)
 {
     try_config_lock();
     YAML::Node proxies, singleproxy, singlegroup, original_groups;
@@ -532,12 +535,20 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
         password = GetMember(json, "Password");
         method = GetMember(json, "EncryptMethod");
 
+        singleproxy["name"] = remark;
+        singleproxy["server"] = hostname;
+        singleproxy["port"] = (unsigned short)stoi(port);
+
         if(x.linkType == SPEEDTEST_MESSAGE_FOUNDSS)
         {
+            //latest clash core removed support for chacha20 encryption
+            if(ext.filter_deprecated && method == "chacha20")
+                continue;
             plugin = GetMember(json, "Plugin");
             pluginopts = replace_all_distinct(GetMember(json, "PluginOption"), ";", "&");
             singleproxy["type"] = "ss";
             singleproxy["cipher"] = method;
+            singleproxy["password"] = password;
             if(plugin == "simple-obfs" || plugin == "obfs-local")
             {
                 singleproxy["plugin"] = "obfs";
@@ -552,6 +563,8 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
                 singleproxy["plugin-opts"]["path"] = getUrlArg(pluginopts, "path");
                 singleproxy["plugin-opts"]["tls"] = pluginopts.find("tls") != pluginopts.npos;
                 singleproxy["plugin-opts"]["mux"] = pluginopts.find("mux") != pluginopts.npos;
+                if(ext.skip_cert_verify)
+                    singleproxy["plugin-opts"]["skip-cert-verify"] = true;
             }
         }
         else if(x.linkType == SPEEDTEST_MESSAGE_FOUNDVMESS)
@@ -567,6 +580,8 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
             singleproxy["alterId"] = stoi(aid);
             singleproxy["cipher"] = method;
             singleproxy["tls"] = tlssecure;
+            if(ext.skip_cert_verify)
+                singleproxy["skip-cert-verify"] = true;
             if(transproto == "ws")
             {
                 singleproxy["network"] = transproto;
@@ -578,12 +593,21 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
         }
         else if(x.linkType == SPEEDTEST_MESSAGE_FOUNDSSR && clashR)
         {
+            //latest clash core removed support for chacha20 encryption
+            if(ext.filter_deprecated && method == "chacha20")
+                continue;
+            //ignoring all nodes with unsupported obfs and protocols
             protocol = GetMember(json, "Protocol");
-            protoparam = GetMember(json, "ProtocolParam");
+            if(std::find(clashr_protocols.cbegin(), clashr_protocols.cend(), protocol) == clashr_protocols.cend())
+                continue;
             obfs = GetMember(json, "OBFS");
+            if(std::find(clashr_obfs.cbegin(), clashr_obfs.cend(), obfs) == clashr_obfs.cend())
+                continue;
+            protoparam = GetMember(json, "ProtocolParam");
             obfsparam = GetMember(json, "OBFSParam");
             singleproxy["type"] = "ssr";
             singleproxy["cipher"] = method;
+            singleproxy["password"] = password;
             singleproxy["protocol"] = protocol;
             singleproxy["protocolparam"] = protoparam;
             singleproxy["obfs"] = obfs;
@@ -593,19 +617,22 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
         {
             singleproxy["type"] = "socks5";
             singleproxy["username"] = username;
+            singleproxy["password"] = password;
+            if(ext.skip_cert_verify)
+                singleproxy["skip-cert-verify"] = true;
         }
         else if(x.linkType == SPEEDTEST_MESSAGE_FOUNDHTTP)
         {
             singleproxy["type"] = "http";
             singleproxy["username"] = username;
+            singleproxy["password"] = password;
             singleproxy["tls"] = type == "HTTPS";
+            if(ext.skip_cert_verify)
+                singleproxy["skip-cert-verify"] = true;
         }
         else
             continue;
-        singleproxy["password"] = password;
-        singleproxy["name"] = remark;
-        singleproxy["server"] = hostname;
-        singleproxy["port"] = (unsigned short)stoi(port);
+
         if(ext.udp)
             singleproxy["udp"] = true;
         singleproxy.SetStyle(YAML::EmitterStyle::Flow);
@@ -618,7 +645,8 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
     {
         YAML::Node provider;
         provider["proxies"] = proxies;
-        return provider;
+        yamlnode = provider;
+        return;
     }
 
     yamlnode["Proxy"] = proxies;
@@ -634,6 +662,9 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
         vArray = split(x, "`");
         if(vArray.size() < 3)
             continue;
+
+        singlegroup["name"] = vArray[0];
+        singlegroup["type"] = vArray[1];
 
         if(vArray[1] == "select")
         {
@@ -656,8 +687,6 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
         if(!filtered_nodelist.size())
             filtered_nodelist.emplace_back("DIRECT");
 
-        singlegroup["name"] = vArray[0];
-        singlegroup["type"] = vArray[1];
         singlegroup["proxies"] = filtered_nodelist;
         //singlegroup.SetStyle(YAML::EmitterStyle::Flow);
 
@@ -675,8 +704,6 @@ YAML::Node netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, stri
     }
 
     yamlnode["Proxy Group"] = original_groups;
-
-    return yamlnode;
 }
 
 std::string netchToClash(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, bool clashR, extra_settings &ext)
@@ -692,12 +719,13 @@ std::string netchToClash(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         return std::string();
     }
 
-    yamlnode = netchToClash(nodes, yamlnode, extra_proxy_group, clashR, ext);
+    netchToClash(nodes, yamlnode, extra_proxy_group, clashR, ext);
 
     if(ext.nodelist)
         return YAML::Dump(yamlnode);
 
-    rulesetToClash(yamlnode, ruleset_content_array);
+    if(ext.enable_rule_generator)
+        rulesetToClash(yamlnode, ruleset_content_array);
 
     return YAML::Dump(yamlnode);
 }
@@ -712,11 +740,15 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
     std::string plugin, pluginopts;
     std::string protocol, protoparam, obfs, obfsparam;
     std::string id, aid, transproto, faketype, host, path, quicsecure, quicsecret;
-    std::string url;
     std::string output_nodelist;
     std::vector<nodeInfo> nodelist;
     unsigned short local_port = 1080;
     bool tlssecure;
+    //group pref
+    std::string url;
+    int interval = 0;
+    std::string ssid_default;
+
     string_array vArray, remarks_list, filtered_nodelist;
 
     ini.store_any_line = true;
@@ -757,11 +789,11 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         while(std::count(remarks_list.begin(), remarks_list.end(), remark) > 0)
             remark = x.remarks = x.remarks + "$";
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         username = GetMember(json, "Username");
         password = GetMember(json, "Password");
         method = GetMember(json, "EncryptMethod");
-        proxy = "";
+        proxy.clear();
 
         if(x.linkType == SPEEDTEST_MESSAGE_FOUNDSS)
         {
@@ -793,6 +825,8 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
             {
                 proxy += ", ws=true, ws-path=" + path + ", ws-headers=Host:" + host;
             }
+            if(ext.skip_cert_verify)
+                proxy += ", skip-cert-verify=1";
             else if(transproto == "kcp" || transproto == "h2" || transproto == "quic")
                 continue;
         }
@@ -805,7 +839,7 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
             obfs = GetMember(json, "OBFS");
             obfsparam = GetMember(json, "OBFSParam");
             proxy = "external, exec=\"" + ext.surge_ssr_path + "\", args=\"";
-            string_array args = {"-l", std::__cxx11::to_string(local_port), "-s", hostname, "-p", port, "-m", method, "-k", password, "-o", obfs, "-O", protocol};
+            string_array args = {"-l", std::to_string(local_port), "-s", hostname, "-p", port, "-m", method, "-k", password, "-o", obfs, "-O", protocol};
             if(obfsparam.size())
             {
                 args.emplace_back("-g");
@@ -821,22 +855,22 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
                 return std::move(a) + "\", args=\"" + std::move(b);
             });
             //std::string ipaddr = (isIPv4(hostname) || isIPv6(hostname)) ? hostname : hostnameToIPAddr(hostname);
-            //proxy += "\", local-port=" + std::__cxx11::to_string(local_port) + ", addresses=" + ipaddr;
-            proxy += "\", local-port=" + std::__cxx11::to_string(local_port);
+            //proxy += "\", local-port=" + std::to_string(local_port) + ", addresses=" + ipaddr;
+            proxy += "\", local-port=" + std::to_string(local_port);
             local_port++;
         }
         else if(x.linkType == SPEEDTEST_MESSAGE_FOUNDSOCKS)
         {
-            proxy = "socks5, " + hostname + ", " + port;
-            if(username.size() && password.size())
-                proxy += ", " + username + ", " + password;
+            proxy = "socks5, " + hostname + ", " + port + ", " + username + ", " + password;
+            if(ext.skip_cert_verify)
+                proxy += ", skip-cert-verify=1";
         }
         else if(type == "HTTP" || type == "HTTPS")
         {
-            proxy = "http," + hostname + "," + port;
-            if(username != "" && password != "")
-                proxy += ", " + username + ", " + password;
+            proxy = "http," + hostname + "," + port + ", " + username + ", " + password;
             proxy += std::string(", tls=") + (type == "HTTPS" ? "true" : "false");
+            if(ext.skip_cert_verify)
+                proxy += ", skip-cert-verify=1";
         }
         else
             continue;
@@ -858,12 +892,13 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         return output_nodelist;
 
     ini.SetCurrentSection("Proxy Group");
+    ini.EraseSection();
     for(std::string &x : extra_proxy_group)
     {
         eraseElements(filtered_nodelist);
         unsigned int rules_upper_bound = 0;
-        url = "";
-        proxy = "";
+        url.clear();
+        proxy.clear();
 
         vArray = split(x, "`");
         if(vArray.size() < 3)
@@ -873,12 +908,25 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         {
             rules_upper_bound = vArray.size();
         }
-        else if(vArray[1] == "url-test" || vArray[1] == "fallback" || vArray[1] == "load-balance")
+        else if(vArray[1] == "url-test" || vArray[1] == "fallback")
         {
             if(vArray.size() < 5)
                 continue;
             rules_upper_bound = vArray.size() - 2;
             url = vArray[vArray.size() - 2];
+            interval = to_int(vArray[vArray.size() - 1]);
+        }
+        else if(vArray[1] == "ssid")
+        {
+            if(vArray.size() < 4)
+                continue;
+            proxy = vArray[1] + ",default=" + vArray[2];
+            proxy += std::accumulate(vArray.begin() + 3, vArray.end(), vArray[3], [](std::string a, std::string b)
+            {
+                return std::move(a) + "," + std::move(b);
+            });
+            ini.Set("{NONAME}", vArray[0] + " = " + proxy); //insert order
+            continue;
         }
         else
             continue;
@@ -898,13 +946,14 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         {
             return std::move(a) + "," + std::move(b);
         });
-        if(vArray[1] == "url-test" || vArray[1] == "fallback" || vArray[1] == "load-balance")
-            proxy += ",url=" + url;
+        if(vArray[1] == "url-test" || vArray[1] == "fallback")
+            proxy += ",url=" + url + ",interval=" + std::to_string(interval);
 
         ini.Set("{NONAME}", vArray[0] + " = " + proxy); //insert order
     }
 
-    rulesetToSurge(ini, ruleset_content_array, surge_ver);
+    if(ext.enable_rule_generator)
+        rulesetToSurge(ini, ruleset_content_array, surge_ver);
 
     return ini.ToString();
 }
@@ -941,7 +990,7 @@ std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
         remark = x.remarks;
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         password = GetMember(json, "Password");
         method = GetMember(json, "EncryptMethod");
         plugin = GetMember(json, "Plugin");
@@ -954,7 +1003,7 @@ std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext)
         switch(x.linkType)
         {
         case SPEEDTEST_MESSAGE_FOUNDSS:
-            proxyStr = "ss://" + urlsafe_base64_encode(method + ":" + password + "@" + hostname + ":" + port);
+            proxyStr = "ss://" + urlsafe_base64_encode(method + ":" + password) + "@" + hostname + ":" + port;
             if(plugin.size() && pluginopts.size())
             {
                 proxyStr += "/?plugin=" + UrlEncode(plugin + ";" +pluginopts);
@@ -963,7 +1012,7 @@ std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext)
             break;
         case SPEEDTEST_MESSAGE_FOUNDSSR:
             if(std::count(ss_ciphers.begin(), ss_ciphers.end(), method) > 0 && protocol == "origin" && obfs == "plain")
-                proxyStr = "ss://" + urlsafe_base64_encode(method + ":" + password + "@" + hostname + ":" + port) + "#" + UrlEncode(remark);
+                proxyStr = "ss://" + urlsafe_base64_encode(method + ":" + password) + "@" + hostname + ":" + port + "#" + UrlEncode(remark);
             break;
         default:
             continue;
@@ -971,7 +1020,10 @@ std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext)
         allLinks += proxyStr + "\n";
     }
 
-    return base64_encode(allLinks);
+    if(ext.nodelist)
+        return allLinks;
+    else
+        return base64_encode(allLinks);
 }
 
 std::string netchToSSR(std::vector<nodeInfo> &nodes, extra_settings &ext)
@@ -1005,7 +1057,7 @@ std::string netchToSSR(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
         remark = x.remarks;
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         password = GetMember(json, "Password");
         method = GetMember(json, "EncryptMethod");
         protocol = GetMember(json, "Protocol");
@@ -1066,7 +1118,7 @@ std::string netchToVMess(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
         remark = x.remarks;
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         method = GetMember(json, "EncryptMethod");
         id = GetMember(json, "UserID");
         aid = GetMember(json, "AlterID");
@@ -1129,7 +1181,7 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
         remark = x.remarks;
 
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         method = GetMember(json, "EncryptMethod");
         password = GetMember(json, "Password");
 
@@ -1151,6 +1203,8 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
                 proxyStr += ", obfs=ws, obfs-path=" + path + ", obfs-header=\"Host: " + host + "\"";
             if(tlssecure)
                 proxyStr += ", over-tls=true, tls-host=" + host;
+            if(ext.skip_cert_verify)
+                proxyStr += ", certificate=0";
             proxyStr = "vmess://" + urlsafe_base64_encode(proxyStr);
             break;
         case SPEEDTEST_MESSAGE_FOUNDSSR:
@@ -1220,7 +1274,7 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
         remark = x.remarks;
 
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         method = GetMember(json, "EncryptMethod");
 
         switch(x.linkType)
@@ -1235,6 +1289,8 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
             proxyStr = "vmess = " + hostname + ":" + port + ", method=" + method + ", password=" + id;
             if(transproto == "ws")
                 proxyStr += ", obfs=ws, obfs-host=" + host + ", obfs-uri=" + path;
+            if(ext.skip_cert_verify)
+                proxyStr += ", certificate=0";
             break;
         case SPEEDTEST_MESSAGE_FOUNDSS:
             password = GetMember(json, "Password");
@@ -1280,6 +1336,7 @@ std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_s
     std::string plugin, pluginopts;
     std::string protocol, protoparam, obfs, obfsparam;
     int port, index = 0;
+
     if(!group.size())
         group = "SSD";
 
@@ -1317,7 +1374,7 @@ std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_s
     {
         json.Parse(x.proxyStr.data());
 
-        remark = x.remarks;
+        remark = "\"" + replace_all_distinct(UTF8ToCodePoint(x.remarks), "\\u1f1", "\\ud83c\\udd") + "\""; //convert UTF-8 characters to code points
         hostname = GetMember(json, "Hostname");
         port = (unsigned short)stoi(GetMember(json, "Port"));
         password = GetMember(json, "Password");
@@ -1348,7 +1405,7 @@ std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_s
             writer.Key("plugin_options");
             writer.String(pluginopts.data());
             writer.Key("remarks");
-            writer.String(remark.data());
+            writer.RawValue(remark.data(), remark.size(), rapidjson::Type::kStringType);
             writer.Key("id");
             writer.Int(index);
             writer.EndObject();
@@ -1367,7 +1424,7 @@ std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_s
                 writer.String(password.data());
                 writer.String(pluginopts.data());
                 writer.Key("remarks");
-                writer.String(remark.data());
+                writer.RawValue(remark.data(), remark.size(), rapidjson::Type::kStringType);
                 writer.Key("id");
                 writer.Int(index);
                 writer.EndObject();
@@ -1441,7 +1498,7 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
         while(std::count(remarks_list.begin(), remarks_list.end(), remark) > 0)
             remark = x.remarks = x.remarks + "$";
         hostname = GetMember(json, "Hostname");
-        port = std::__cxx11::to_string((unsigned short)stoi(GetMember(json, "Port")));
+        port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         username = GetMember(json, "Username");
         password = GetMember(json, "Password");
         method = GetMember(json, "EncryptMethod");
@@ -1492,8 +1549,8 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
     {
         eraseElements(filtered_nodelist);
         unsigned int rules_upper_bound = 0;
-        url = "";
-        proxy = "";
+        url.clear();
+        proxy.clear();
 
         vArray = split(x, "`");
         if(vArray.size() < 3)
@@ -1548,7 +1605,8 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
         ini.Set("{NONAME}", proxy); //insert order
     }
 
-    rulesetToSurge(ini, ruleset_content_array, 2);
+    if(ext.enable_rule_generator)
+        rulesetToSurge(ini, ruleset_content_array, 2);
     ini.RenameSection("Rule", "RoutingRule");
 }
 

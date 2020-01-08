@@ -11,7 +11,6 @@
 #include "rapidjson_extra.h"
 #include "ini_reader.h"
 
-using namespace std::__cxx11;
 using namespace rapidjson;
 using namespace YAML;
 /*
@@ -245,7 +244,7 @@ void explodeVmessConf(std::string content, std::string custom_port, int local_po
             node.group = V2RAY_DEFAULT_GROUP;
             node.remarks = add + ":" + port;
             node.server = add;
-            node.port = stoi(port);
+            node.port = to_int(port);
             nodes.push_back(node);
         }
         return;
@@ -320,7 +319,7 @@ void explodeVmessConf(std::string content, std::string custom_port, int local_po
         node.remarks = ps;
         node.id = index;
         node.server = add;
-        node.port = stoi(port);
+        node.port = to_int(port);
         nodes.push_back(node);
     }
     return;
@@ -349,8 +348,8 @@ void explodeSS(std::string ss, bool libev, std::string custom_port, int local_po
     }
     if(strFind(ss, "@"))
     {
-        ss = regReplace(ss, "(.*?)@(.*):(.*)", "$1,$2,$3");
-        args = split(ss, ",");
+        ss = regReplace(ss, "(.*?)@(.*):(.*)", "$1|$2|$3");
+        args = split(ss, "|");
         secret = split(urlsafe_base64_decode(args[0]), ":");
         method = secret[0];
         password = secret[1];
@@ -359,8 +358,8 @@ void explodeSS(std::string ss, bool libev, std::string custom_port, int local_po
     }
     else
     {
-        ss = regReplace(urlsafe_base64_decode(ss), "(.*?):(.*?)@(.*):(.*)", "$1,$2,$3,$4");
-        args = split(ss, ",");
+        ss = regReplace(urlsafe_base64_decode(ss), "(.*?):(.*?)@(.*):(.*)", "$1|$2|$3|$4");
+        args = split(ss, "|");
         method = args[0];
         password = args[1];
         server = args[2];
@@ -416,7 +415,7 @@ void explodeSSD(std::string link, bool libev, std::string custom_port, int local
         node.group = group;
         node.remarks = remarks;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.proxyStr = ssConstruct(server, port, password, method, plugin, pluginopts, remarks, local_port, libev);
         node.id = index;
         nodes.push_back(node);
@@ -455,7 +454,7 @@ void explodeSSAndroid(std::string ss, bool libev, std::string custom_port, int l
         node.group = group;
         node.remarks = ps;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.proxyStr = ssConstruct(server, port, password, method, "", "", ps, local_port, libev);
         nodes.push_back(node);
         index++;
@@ -482,7 +481,7 @@ void explodeSSConf(std::string content, std::string custom_port, int local_port,
         node.group = SS_DEFAULT_GROUP;
         node.remarks = server + ":" + port;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.proxyStr = SerializeObject(json);
         nodes.push_back(node);
         return;
@@ -510,7 +509,7 @@ void explodeSSConf(std::string content, std::string custom_port, int local_port,
         node.remarks = ps;
         node.id = index;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.proxyStr = ssConstruct(server, port, password, method, plugin, pluginopts, ps, local_port, libev);
         nodes.push_back(node);
         index++;
@@ -536,8 +535,8 @@ void explodeSSR(std::string ssr, bool ss_libev, bool ssr_libev, std::string cust
         protoparam = regReplace(urlsafe_base64_decode(getUrlArg(strobfs, "protoparam")), "\\s", "");
     }
 
-    ssr = regReplace(ssr, "(.*):(.*?):(.*?):(.*?):(.*?):(.*)", "$1,$2,$3,$4,$5,$6");
-    strcfg = split(ssr, ",");
+    ssr = regReplace(ssr, "(.*):(.*?):(.*?):(.*?):(.*?):(.*)", "$1|$2|$3|$4|$5|$6");
+    strcfg = split(ssr, "|");
 
     if(strcfg.size() != 6)
         return;
@@ -601,7 +600,7 @@ void explodeSSRConf(std::string content, std::string custom_port, int local_port
         node.group = SSR_DEFAULT_GROUP;
         node.remarks = server + ":" + port;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.proxyStr = SerializeObject(json);
         nodes.push_back(node);
         return;
@@ -634,7 +633,7 @@ void explodeSSRConf(std::string content, std::string custom_port, int local_port
         node.remarks = remarks;
         node.id = index;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.proxyStr = ssrConstruct(group, remarks, remarks_base64, server, port, protocol, method, obfs, password, obfsparam, protoparam, local_port, ssr_libev);
         nodes.push_back(node);
         index++;
@@ -840,11 +839,11 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
             if(singleproxy["tls"].IsDefined())
                 tls = singleproxy["tls"].as<std::string>() == "true" ? "tls" : "";
             else
-                tls = "";
+                tls.clear();
             if(singleproxy["ws-headers"].IsDefined())
                 singleproxy["ws-headers"]["Host"] >> host;
             else
-                host = "";
+                host.clear();
 
 
             node.linkType = SPEEDTEST_MESSAGE_FOUNDVMESS;
@@ -867,7 +866,7 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
                         if(singleproxy["plugin-opts"]["host"].IsDefined())
                             singleproxy["plugin-opts"]["host"] >> pluginopts_host;
                         else
-                            pluginopts_host = "";
+                            pluginopts_host.clear();
                     }
                 }
                 else if(singleproxy["plugin"].as<std::string>() == "v2ray-plugin")
@@ -879,19 +878,19 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
                         if(singleproxy["plugin-opts"]["host"].IsDefined())
                             singleproxy["plugin-opts"]["host"] >> pluginopts_host;
                         else
-                            pluginopts_host = "";
+                            pluginopts_host.clear();
                         if(singleproxy["plugin-opts"]["tls"].IsDefined())
                             tls = singleproxy["plugin-opts"]["tls"].as<bool>() ? "tls;" : "";
                         else
-                            tls = "";
+                            tls.clear();
                         if(singleproxy["plugin-opts"]["path"].IsDefined())
                             singleproxy["plugin-opts"]["path"] >> path;
                         else
-                            path = "";
+                            path.clear();
                         if(singleproxy["plugin-opts"]["mux"].IsDefined())
                             pluginopts_mux = singleproxy["plugin-opts"]["mux"].as<bool>() ? "mux=4;" : "";
                         else
-                            pluginopts_mux = "";
+                            pluginopts_mux.clear();
                     }
                 }
             }
@@ -903,7 +902,7 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
                     singleproxy["obfs-host"] >> pluginopts_host;
             }
             else
-                plugin = "";
+                plugin.clear();
 
             if(plugin == "simple-obfs")
             {
@@ -921,7 +920,7 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
                     pluginopts += "mux=" + pluginopts_mux + ";";
             }
             else
-                pluginopts = "";
+                pluginopts.clear();
 
             //support for go-shadowsocks2
             if(cipher == "AEAD_CHACHA20_POLY1305")
@@ -943,6 +942,11 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
             {
                 singleproxy["username"] >> user;
                 singleproxy["password"] >> password;
+            }
+            else
+            {
+                user.clear();
+                password.clear();
             }
 
             node.linkType = SPEEDTEST_MESSAGE_FOUNDSOCKS;
@@ -971,6 +975,11 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
                 singleproxy["username"] >> user;
                 singleproxy["password"] >> password;
             }
+            else
+            {
+                user.clear();
+                password.clear();
+            }
 
             node.linkType = SPEEDTEST_MESSAGE_FOUNDHTTP;
             node.proxyStr = httpConstruct(ps, server, port, user, password);
@@ -981,7 +990,7 @@ void explodeClash(Node yamlnode, std::string custom_port, int local_port, std::v
         node.group = group;
         node.remarks = ps;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.id = index;
         nodes.push_back(node);
         index++;
@@ -1140,7 +1149,7 @@ bool explodeSurge(std::string surge, std::string custom_port, int local_port, st
                 port = custom_port == "" ? trim(configs[2]) : custom_port;
                 method = trim(configs[3]);
                 password = trim(configs[4]);
-                plugin = "";
+                plugin.clear();
 
                 for(i = 6; i < configs.size(); i++)
                 {
@@ -1174,7 +1183,7 @@ bool explodeSurge(std::string surge, std::string custom_port, int local_port, st
         {
             server = trim(configs[1]);
             port = custom_port == "" ? trim(configs[2]) : custom_port;
-            plugin = "";
+            plugin.clear();
 
             for(i = 3; i < configs.size(); i++)
             {
@@ -1209,6 +1218,8 @@ bool explodeSurge(std::string surge, std::string custom_port, int local_port, st
         {
             node.linkType = SPEEDTEST_MESSAGE_FOUNDSOCKS;
             node.group = SOCKS_DEFAULT_GROUP;
+            server = trim(configs[1]);
+            port = custom_port == "" ? trim(configs[2]) : custom_port;
             if(configs.size() >= 5)
             {
                 username = trim(configs[2]);
@@ -1266,6 +1277,8 @@ bool explodeSurge(std::string surge, std::string custom_port, int local_port, st
         {
             node.linkType = SPEEDTEST_MESSAGE_FOUNDHTTP;
             node.group = HTTP_DEFAULT_GROUP;
+            server = trim(configs[1]);
+            port = custom_port == "" ? trim(configs[2]) : custom_port;
             if(configs.size() >= 5)
             {
                 username = trim(configs[2]);
@@ -1330,7 +1343,7 @@ bool explodeSurge(std::string surge, std::string custom_port, int local_port, st
 
         node.remarks = remarks;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         node.id = index;
         nodes.push_back(node);
         index++;
@@ -1394,7 +1407,7 @@ void explodeSSTap(std::string sstap, std::string custom_port, int local_port, st
         node.remarks = remarks;
         node.id = index;
         node.server = server;
-        node.port = stoi(port);
+        node.port = to_int(port);
         nodes.push_back(node);
     }
 }
