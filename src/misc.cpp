@@ -124,7 +124,7 @@ unsigned char FromHex(unsigned char x)
     else if (x >= '0' && x <= '9')
         y = x - '0';
     else
-        assert(0);
+        y = x;
     return y;
 }
 
@@ -154,7 +154,7 @@ std::string UrlEncode(const std::string& str)
 
 std::string UrlDecode(const std::string& str)
 {
-    std::string strTemp = "";
+    std::string strTemp;
     size_t length = str.length();
     for (size_t i = 0; i < length; i++)
     {
@@ -164,9 +164,14 @@ std::string UrlDecode(const std::string& str)
         {
             if(i + 2 >= length)
                 return strTemp;
-            unsigned char high = FromHex((unsigned char)str[++i]);
-            unsigned char low = FromHex((unsigned char)str[++i]);
-            strTemp += high * 16 + low;
+            if(isalnum(str[i + 1]) && isalnum(str[i + 2]))
+            {
+                unsigned char high = FromHex((unsigned char)str[++i]);
+                unsigned char low = FromHex((unsigned char)str[++i]);
+                strTemp += high * 16 + low;
+            }
+            else
+                strTemp += str[i];
         }
         else
             strTemp += str[i];
@@ -763,12 +768,12 @@ void urlParse(std::string url, std::string &host, std::string &path, int &port, 
     {
         args = split(regReplace(host, "\\[(.*)\\](.*)", "$1,$2"), ",");
         if(args.size() == 2) //with port
-            port = stoi(args[1].substr(1));
+            port = to_int(args[1].substr(1));
         host = args[0];
     }
     else if(strFind(host, ":"))
     {
-        port = stoi(host.substr(host.rfind(":") + 1));
+        port = to_int(host.substr(host.rfind(":") + 1));
         host = host.substr(0, host.rfind(":"));
     }
     if(port == 0)
@@ -861,11 +866,11 @@ void shortDisassemble(int source, unsigned short &num_a, unsigned short &num_b)
     num_b = (unsigned short)(source >> 16);
 }
 
-int to_int(std::string &s, int def_vaule)
+int to_int(std::string str, int def_vaule)
 {
     int retval = 0;
     char c;
-    std::stringstream ss(s);
+    std::stringstream ss(str);
     if(!(ss >> retval))
         return def_vaule;
     else if(ss >> c)
