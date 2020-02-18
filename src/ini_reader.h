@@ -9,12 +9,15 @@
 
 #include "misc.h"
 
-#define INIREADER_EXCEPTION_NONE 0
-#define INIREADER_EXCEPTION_EMPTY -1
-#define INIREADER_EXCEPTION_DUPLICATE -2
-#define INIREADER_EXCEPTION_OUTOFBOUND -3
-#define INIREADER_EXCEPTION_NOTEXIST -4
-#define INIREADER_EXCEPTION_NOTPARSED -5
+enum
+{
+    INIREADER_EXCEPTION_EMPTY = -5,
+    INIREADER_EXCEPTION_DUPLICATE,
+    INIREADER_EXCEPTION_OUTOFBOUND,
+    INIREADER_EXCEPTION_NOTEXIST,
+    INIREADER_EXCEPTION_NOTPARSED,
+    INIREADER_EXCEPTION_NONE
+};
 
 #define __SAVE_ERROR_AND_RETURN(x) {last_error = x; return last_error;}
 
@@ -81,6 +84,11 @@ public:
     bool allow_dup_section_titles = false;
 
     /**
+    *  @brief Keep an empty section while parsing
+    */
+    bool keep_empty_section = true;
+
+    /**
     *  @brief Initialize the reader.
     */
     INIReader()
@@ -98,6 +106,28 @@ public:
     }
 
     ~INIReader() = default;
+
+    INIReader& operator=(const INIReader& src)
+    {
+        //copy contents
+        ini_content = src.ini_content;
+        //copy status
+        parsed = src.parsed;
+        current_section = src.current_section;
+        exclude_sections = src.exclude_sections;
+        include_sections = src.include_sections;
+        read_sections = src.read_sections;
+        section_order = src.section_order;
+        isolated_items_section = src.isolated_items_section;
+        //copy preferences
+        do_utf8_to_gbk = src.do_utf8_to_gbk;
+        store_any_line = src.store_any_line;
+        store_isolated_line = src.store_isolated_line;
+        allow_dup_section_titles = src.allow_dup_section_titles;
+        return *this;
+    }
+
+    INIReader(const INIReader &src) = default;
 
     std::string GetErrorString(int error)
     {
@@ -150,25 +180,6 @@ public:
         isolated_items_section = section;
     }
 
-    INIReader& operator=(const INIReader& src)
-    {
-        //copy contents
-        ini_content = src.ini_content;
-        //copy status
-        parsed = src.parsed;
-        current_section = src.current_section;
-        exclude_sections = src.exclude_sections;
-        include_sections = src.include_sections;
-        read_sections = src.read_sections;
-        isolated_items_section = src.isolated_items_section;
-        //copy preferences
-        do_utf8_to_gbk = src.do_utf8_to_gbk;
-        store_any_line = src.store_any_line;
-        store_isolated_line = src.store_isolated_line;
-        allow_dup_section_titles = src.allow_dup_section_titles;
-        return *this;
-    }
-
     /**
     *  @brief Parse INI content into mapped data structure.
     * If exclude sections are set, these sections will not be stored.
@@ -192,7 +203,7 @@ public:
 
         EraseAll(); //first erase all data
         if(do_utf8_to_gbk && is_str_utf8(content))
-            content = UTF8ToGBK(content); //do conversion if flag is set
+            content = UTF8ToACP(content); //do conversion if flag is set
 
         if(store_isolated_line)
             curSection = isolated_items_section; //items before any section define will be store in this section
@@ -202,13 +213,13 @@ public:
         {
             last_error_index++;
             lineSize = strLine.size();
-            if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
-                continue;
-            if(strLine[lineSize - 1] == '\r') //remove line break
+            if(lineSize && strLine[lineSize - 1] == '\r') //remove line break
             {
-                strLine = strLine.substr(0, lineSize - 1);
+                strLine.erase(lineSize - 1);
                 lineSize--;
             }
+            if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
+                continue;
             if(strLine.find("=") != strLine.npos) //is an item
             {
                 if(inExcludedSection) //this section is excluded
@@ -224,23 +235,24 @@ public:
                 thisSection = strLine.substr(1, lineSize - 2); //save section title
                 inExcludedSection = chkIgnore(thisSection); //check if this section is excluded
 
-                if(curSection.size() && itemGroup.size()) //just finished reading a section
+                if(curSection.size() && (keep_empty_section || itemGroup.size())) //just finished reading a section
                 {
                     if(ini_content.count(curSection)) //a section with the same name has been inserted
                     {
-                        if(allow_dup_section_titles)
+                        if(allow_dup_section_titles || !ini_content.at(curSection).size())
                         {
                             eraseElements(existItemGroup);
                             existItemGroup = ini_content.at(curSection); //get the old items
                             for(auto &x : existItemGroup)
                                 itemGroup.emplace(x); //insert them all into new section
-                            ini_content.erase(curSection); //remove the old section
                         }
-                        else
+                        else if(ini_content.at(curSection).size())
                             __SAVE_ERROR_AND_RETURN(INIREADER_EXCEPTION_DUPLICATE); //not allowed, stop
+                        ini_content.erase(curSection); //remove the old section
                     }
+                    else if(itemGroup.size())
+                        read_sections.push_back(curSection); //add to read sections list
                     ini_content.emplace(curSection, itemGroup); //insert previous section to content map
-                    read_sections.push_back(curSection); //add to read sections list
                     if(std::count(section_order.cbegin(), section_order.cend(), curSection) == 0)
                         section_order.emplace_back(curSection);
                 }
@@ -255,7 +267,7 @@ public:
             if(include_sections.size() && include_sections == read_sections) //all included sections has been read
                 break; //exit now
         }
-        if(curSection.size() && itemGroup.size()) //final section
+        if(curSection.size() && (keep_empty_section || itemGroup.size())) //final section
         {
             if(ini_content.count(curSection)) //a section with the same name has been inserted
             {
@@ -265,13 +277,14 @@ public:
                     existItemGroup = ini_content.at(curSection); //get the old items
                     for(auto &x : existItemGroup)
                         itemGroup.emplace(x); //insert them all into new section
-                    ini_content.erase(curSection); //remove the old section
                 }
-                else
+                else if(ini_content.at(curSection).size())
                     __SAVE_ERROR_AND_RETURN(INIREADER_EXCEPTION_DUPLICATE); //not allowed, stop
+                ini_content.erase(curSection); //remove the old section
             }
+            else if(itemGroup.size())
+                read_sections.emplace_back(curSection); //add to read sections list
             ini_content.emplace(curSection, itemGroup); //insert this section to content map
-            read_sections.emplace_back(curSection); //add to read sections list
             if(std::count(section_order.cbegin(), section_order.cend(), curSection) == 0)
                 section_order.emplace_back(curSection);
         }
@@ -765,7 +778,10 @@ public:
             return;
         eraseElements(ini_content.at(section));
         if(cached_section == section)
+        {
             eraseElements(cached_section_content);
+            cached_section.erase();
+        }
         //section_order.erase(std::find(section_order.begin(), section_order.end(), section));
     }
 
@@ -803,7 +819,7 @@ public:
             content += "\n";
         }
 
-        return content.substr(0, content.size() - 2);
+        return content.erase(content.size() - 2);
     }
 
     /**

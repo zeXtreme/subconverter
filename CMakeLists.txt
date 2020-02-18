@@ -1,45 +1,54 @@
 project(subconverter LANGUAGES CXX)
 cmake_minimum_required(VERSION 3.4)
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
+INCLUDE_DIRECTORIES("${CMAKE_SOURCE_DIR}/include/")
 IF(NOT CMAKE_BUILD_TYPE)
-	SET(CMAKE_BUILD_TYPE Release)
+    SET(CMAKE_BUILD_TYPE Release)
 ENDIF()
 SET(CMAKE_CXX_STANDARD 17)
-ADD_DEFINITIONS(-Wall -Wextra -Wno-unused-parameter -Wno-unused-result)
 
-OPTION(USING_STD_REGEX "Use std::regex from C++ library instead of PCRECPP." OFF)
+
+IF (NOT MSVC)
+    ADD_COMPILE_OPTIONS(-Wall -Wextra -Wno-unused-parameter -Wno-unused-result)
+ELSE()
+    ADD_COMPILE_OPTIONS(/W4)
+ENDIF()
+
+OPTION(USING_STD_REGEX "Use std::regex from C++ library instead of PCRE2." OFF)
 OPTION(USING_MALLOC_TRIM "Call malloc_trim after processing request to lower memory usage (Your system must support malloc_trim)." OFF)
+OPTION(USING_MBEDTLS "Use mbedTLS instead of OpenSSL for MD5 calculation." OFF)
 
 INCLUDE(CheckCXXSourceCompiles)
 CHECK_CXX_SOURCE_COMPILES(
 "
 #include<string>
-int main(){std::to_string(0);return 0;}
+void main(){std::to_string(0);}
 " HAVE_TO_STRING)
 
 IF(APPLE)
-	ADD_DEFINITIONS(-D_MACOS)
+    ADD_DEFINITIONS(-D_MACOS)
 ENDIF()
 
 IF(HAVE_TO_STRING)
-	ADD_DEFINITIONS(-DHAVE_TO_STRING)
+    ADD_DEFINITIONS(-DHAVE_TO_STRING)
 ENDIF()
 
 IF(USING_MALLOC_TRIM)
-	ADD_DEFINITIONS(-DMALLOC_TRIM)
+    ADD_DEFINITIONS(-DMALLOC_TRIM)
 ENDIF()
 
 ADD_EXECUTABLE(subconverter 
-	src/logger.cpp
-	src/main.cpp
-	src/misc.cpp
-	src/multithread.cpp
-	src/nodemanip.cpp
-	src/rapidjson_extra.cpp
-	src/speedtestutil.cpp
-	src/subexport.cpp
-	src/webget.cpp
-	src/webserver_libevent.cpp)
+    src/interfaces.cpp
+    src/logger.cpp
+    src/main.cpp
+    src/misc.cpp
+    src/multithread.cpp
+    src/nodemanip.cpp
+    src/rapidjson_extra.cpp
+    src/speedtestutil.cpp
+    src/subexport.cpp
+    src/webget.cpp
+    src/webserver_libevent.cpp)
 INCLUDE_DIRECTORIES(src)
 LINK_DIRECTORIES(${CMAKE_SOURCE_DIR})
 
@@ -61,9 +70,16 @@ INCLUDE_DIRECTORIES(${CURL_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(subconverter ${CURL_LIBRARIES})
 ADD_DEFINITIONS(-DCURL_STATICLIB)
 
-FIND_PACKAGE(OpenSSL 1.1.0 REQUIRED)
-INCLUDE_DIRECTORIES(${OPENSSL_INCLUDE_DIR})
-TARGET_LINK_LIBRARIES(subconverter ${OPENSSL_LIBRARIES})
+IF(USING_MBEDTLS STREQUAL "ON")
+    FIND_PACKAGE(MbedTLS REQUIRED)
+    INCLUDE_DIRECTORIES(${MBEDTLS_INCLUDE_DIRS})
+    TARGET_LINK_LIBRARIES(subconverter ${MBEDCRYPTO_LIBRARY})
+    ADD_DEFINITIONS(-DUSE_MBEDTLS)
+ELSE()
+    FIND_PACKAGE(OpenSSL 1.1.0 REQUIRED)
+    INCLUDE_DIRECTORIES(${OPENSSL_INCLUDE_DIR})
+    TARGET_LINK_LIBRARIES(subconverter ${OPENSSL_LIBRARIES})
+ENDIF()
 
 FIND_PACKAGE(Rapidjson REQUIRED)
 INCLUDE_DIRECTORIES(${RAPIDJSON_INCLUDE_DIRS})
@@ -75,18 +91,18 @@ INCLUDE_DIRECTORIES(${YAML_CPP_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(subconverter ${YAML_CPP_LIBRARY})
 
 IF(USING_STD_REGEX STREQUAL "ON")
-	ADD_DEFINITIONS(-DUSE_STD_REGEX)
+    ADD_DEFINITIONS(-DUSE_STD_REGEX)
 ELSE()
-	FIND_PACKAGE(PCRECPP REQUIRED)
-	INCLUDE_DIRECTORIES(${PCRECPP_INCLUDE_DIRS})
-	TARGET_LINK_LIBRARIES(subconverter ${PCRECPP_LIBRARIES})
-	ADD_DEFINITIONS(-DPCRE_STATIC)
+    FIND_PACKAGE(PCRE2 REQUIRED)
+    INCLUDE_DIRECTORIES(${PCRE2_INCLUDE_DIRS})
+    TARGET_LINK_LIBRARIES(subconverter ${PCRE2_LIBRARY})
+    ADD_DEFINITIONS(-DPCRE2_STATIC)
 ENDIF()
 
 IF(WIN32)
-	TARGET_LINK_LIBRARIES(subconverter wsock32 ws2_32)
+    TARGET_LINK_LIBRARIES(subconverter wsock32 ws2_32)
 ELSE()
-	INCLUDE(GNUInstallDirs)
-	INSTALL(TARGETS subconverter DESTINATION ${CMAKE_INSTALL_BINDIR}/subconverter)
-	INSTALL(DIRECTORY base/ DESTINATION ${CMAKE_INSTALL_BINDIR}/subconverter FILES_MATCHING PATTERN "*")
+    INCLUDE(GNUInstallDirs)
+    INSTALL(TARGETS subconverter DESTINATION ${CMAKE_INSTALL_BINDIR}/subconverter)
+    INSTALL(DIRECTORY base/ DESTINATION ${CMAKE_INSTALL_BINDIR}/subconverter FILES_MATCHING PATTERN "*")
 ENDIF()

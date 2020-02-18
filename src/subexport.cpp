@@ -15,9 +15,6 @@
 #include <rapidjson/document.h>
 #include <yaml-cpp/yaml.h>
 
-extern bool overwrite_original_rules;
-extern string_array renames, emojis;
-extern bool add_emoji, remove_old_emoji;
 extern bool api_mode;
 extern string_array ss_ciphers, ssr_ciphers;
 
@@ -61,7 +58,7 @@ std::string hostnameToIPAddr(std::string host)
 }
 */
 
-std::string vmessConstruct(std::string add, std::string port, std::string type, std::string id, std::string aid, std::string net, std::string cipher, std::string path, std::string host, std::string tls, int local_port)
+std::string vmessConstruct(std::string add, std::string port, std::string type, std::string id, std::string aid, std::string net, std::string cipher, std::string path, std::string host, std::string edge, std::string tls, int local_port)
 {
     if(!path.size())
         path = "/";
@@ -91,10 +88,12 @@ std::string vmessConstruct(std::string add, std::string port, std::string type, 
     writer.String(cipher.data());
     writer.Key("TransferProtocol");
     writer.String(net.data());
+    writer.Key("Host");
+    writer.String(host.data());
+    writer.Key("Edge");
+    writer.String(edge.data());
     if(net == "ws")
     {
-        writer.Key("Host");
-        writer.String(host.data());
         writer.Key("Path");
         writer.String(path.data());
     }
@@ -230,7 +229,7 @@ std::string vmessLinkConstruct(std::string remarks, std::string add, std::string
     writer.Key("id");
     writer.String(id.data());
     writer.Key("aid");
-    writer.Int(to_int(port));
+    writer.Int(to_int(aid));
     writer.Key("net");
     writer.String(net.data());
     writer.Key("path");
@@ -243,11 +242,11 @@ std::string vmessLinkConstruct(std::string remarks, std::string add, std::string
     return sb.GetString();
 }
 
-std::string nodeRename(std::string remark)
+std::string nodeRename(std::string remark, const string_array &rename_array)
 {
-    string_array vArray, renames_temp = safe_get_renames();
+    string_array vArray;
 
-    for(std::string &x : renames_temp)
+    for(const std::string &x : rename_array)
     {
         vArray = split(x, "@");
         if(vArray.size() == 1)
@@ -266,25 +265,21 @@ std::string nodeRename(std::string remark)
 
 std::string removeEmoji(std::string remark)
 {
-    if(!remove_old_emoji)
-        return remark;
     char emoji_id[2] = {(char)-16, (char)-97};
     while(true)
     {
         if(remark[0] == emoji_id[0] && remark[1] == emoji_id[1])
-            remark = remark.substr(4);
+            remark.erase(0, 4);
         else
             break;
     }
     return remark;
 }
 
-std::string addEmoji(std::string remark)
+std::string addEmoji(std::string remark, const string_array &emoji_array)
 {
-    if(!add_emoji)
-        return remark;
-    string_array vArray, emojis_temp = safe_get_emojis();
-    for(std::string &x : emojis_temp)
+    string_array vArray;
+    for(const std::string &x : emoji_array)
     {
         vArray = split(x, ",");
         if(vArray.size() != 2)
@@ -298,9 +293,8 @@ std::string addEmoji(std::string remark)
     return remark;
 }
 
-void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset_content_array)
+void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset_content_array, bool overwrite_original_rules)
 {
-    try_config_lock();
     string_array allRules, vArray;
     std::string rule_group, retrived_rules, strLine;
     std::stringstream strStrm;
@@ -328,10 +322,16 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset
 
         strStrm.clear();
         strStrm<<retrived_rules;
+        std::string::size_type lineSize;
         while(getline(strStrm, strLine, delimiter))
         {
-            strLine = replace_all_distinct(strLine, "\r", ""); //remove line break
-            if(!strLine.size() || strLine.find("#") == 0 || strLine.find(";") == 0) //remove comments
+            lineSize = strLine.size();
+            if(lineSize && strLine[lineSize - 1] == '\r') //remove line break
+            {
+                strLine.erase(lineSize - 1);
+                lineSize--;
+            }
+            if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
                 continue;
             if(strLine.find("USER-AGENT") == 0 || strLine.find("URL-REGEX") == 0 || strLine.find("PROCESS-NAME") == 0 || strLine.find("AND") == 0 || strLine.find("OR") == 0) //remove unsupported types
                 continue;
@@ -357,17 +357,31 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset
     base_rule["Rule"] = Rules;
 }
 
-void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_content_array, int surge_ver)
+void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_content_array, int surge_ver, bool overwrite_original_rules, std::string remote_path_prefix)
 {
-    try_config_lock();
     string_array allRules;
     std::string rule_group, rule_path, retrived_rules, strLine;
     std::stringstream strStrm;
 
-    base_rule.SetCurrentSection("Rule");
+    switch(surge_ver)
+    {
+    case 0:
+        base_rule.SetCurrentSection("RoutingRule"); //Mellow
+        break;
+    case -1:
+        base_rule.SetCurrentSection("filter_local"); //Quantumult X
+        break;
+    case -2:
+        base_rule.SetCurrentSection("TCP"); //Quantumult
+        break;
+    default:
+        base_rule.SetCurrentSection("Rule");
+    }
 
     if(overwrite_original_rules)
         base_rule.EraseSection();
+
+    const std::string rule_match_regex = "^(.*?,.*?)(,.*)(,.*)$";
 
     for(ruleset_content &x : ruleset_content_array)
     {
@@ -378,7 +392,21 @@ void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_
             strLine = retrived_rules.substr(2);
             if(strLine == "MATCH")
                 strLine = "FINAL";
-            allRules.emplace_back(strLine + "," + rule_group);
+            strLine += "," + rule_group;
+            if(surge_ver == -1 || surge_ver == -2)
+            {
+                if(std::count(strLine.begin(), strLine.end(), ',') > 2 && regReplace(strLine, rule_match_regex, "$2") == ",no-resolve")
+                    strLine = regReplace(strLine, rule_match_regex, "$1$3$2");
+                else
+                    strLine = regReplace(strLine, rule_match_regex, "$1$3");
+            }
+            else
+            {
+                if(std::count(strLine.begin(), strLine.end(), ',') > 2)
+                    strLine = regReplace(strLine, rule_match_regex, "$1$3$2");
+            }
+            strLine = replace_all_distinct(strLine, ",,", ",");
+            allRules.emplace_back(strLine);
             continue;
         }
         else
@@ -388,7 +416,31 @@ void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_
             {
                 if(surge_ver > 2)
                 {
-                    allRules.emplace_back("RULE-SET," + rule_path + "," + rule_group);
+                    strLine = "RULE-SET," + rule_path + "," + rule_group;
+                    allRules.emplace_back(strLine);
+                    continue;
+                }
+                else if(surge_ver == -1 && remote_path_prefix.size())
+                {
+                    strLine = remote_path_prefix + "/getruleset?type=2&url=" + urlsafe_base64_encode(rule_path) + "&group=" + urlsafe_base64_encode(rule_group);
+                    strLine += ", tag=" + rule_group + ", enabled=true";
+                    base_rule.Set("filter_remote", "{NONAME}", strLine);
+                    continue;
+                }
+            }
+            else
+            {
+                if(surge_ver > 2 && remote_path_prefix.size())
+                {
+                    strLine = "RULE-SET," + remote_path_prefix + "/getruleset?type=1&url=" + urlsafe_base64_encode(rule_path) + "," + rule_group;
+                    allRules.emplace_back(strLine);
+                    continue;
+                }
+                else if(surge_ver == -1 && remote_path_prefix.size())
+                {
+                    strLine = remote_path_prefix + "/getruleset?type=2&url=" + urlsafe_base64_encode(rule_path) + "&group=" + urlsafe_base64_encode(rule_group);
+                    strLine += ", tag=" + rule_group + ", enabled=true";
+                    base_rule.Set("filter_remote", "{NONAME}", strLine);
                     continue;
                 }
             }
@@ -397,14 +449,33 @@ void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_
 
             strStrm.clear();
             strStrm<<retrived_rules;
+            std::string::size_type lineSize;
             while(getline(strStrm, strLine, delimiter))
             {
-                strLine = replace_all_distinct(strLine, "\r", ""); //remove line break
-                if(!strLine.size() || strLine.find("#") == 0 || strLine.find(";") == 0) //remove comments
+                lineSize = strLine.size();
+                if(lineSize && strLine[lineSize - 1] == '\r') //remove line break
+                {
+                    strLine.erase(lineSize - 1);
+                    lineSize--;
+                }
+                if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
                     continue;
+                if((surge_ver == -1 || surge_ver == -2) && (strLine.find("IP-CIDR6") == 0 || strLine.find("URL-REGEX") == 0 || strLine.find("PROCESS-NAME") == 0 || strLine.find("AND") == 0 || strLine.find("OR") == 0)) //remove unsupported types
+                    continue;
+
                 strLine += "," + rule_group;
-                if(std::count(strLine.begin(), strLine.end(), ',') > 2)
-                    strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
+                if(surge_ver == -1 || surge_ver == -2)
+                {
+                    if(std::count(strLine.begin(), strLine.end(), ',') > 2 && regReplace(strLine, rule_match_regex, "$2") == ",no-resolve")
+                        strLine = regReplace(strLine, rule_match_regex, "$1$3$2");
+                    else
+                        strLine = regReplace(strLine, rule_match_regex, "$1$3");
+                }
+                else
+                {
+                    if(std::count(strLine.begin(), strLine.end(), ',') > 2)
+                        strLine = regReplace(strLine, rule_match_regex, "$1$3$2");
+                }
                 allRules.emplace_back(strLine);
             }
         }
@@ -483,25 +554,24 @@ void groupGenerate(std::string &rule, std::vector<nodeInfo> &nodelist, std::vect
 
 void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_array &extra_proxy_group, bool clashR, extra_settings &ext)
 {
-    try_config_lock();
     YAML::Node proxies, singleproxy, singlegroup, original_groups;
     rapidjson::Document json;
     std::string type, remark, hostname, port, username, password, method;
     std::string plugin, pluginopts;
     std::string protocol, protoparam, obfs, obfsparam;
-    std::string id, aid, transproto, faketype, host, path, quicsecure, quicsecret;
+    std::string id, aid, transproto, faketype, host, edge, path, quicsecure, quicsecret;
     std::vector<nodeInfo> nodelist;
     bool tlssecure, replace_flag;
     string_array vArray, remarks_list, filtered_nodelist;
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -569,6 +639,7 @@ void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_arr
             aid = GetMember(json, "AlterID");
             transproto = GetMember(json, "TransferProtocol");
             host = GetMember(json, "Host");
+            edge = GetMember(json, "Edge");
             path = GetMember(json, "Path");
             tlssecure = GetMember(json, "TLSSecure") == "true";
             singleproxy["type"] = "vmess";
@@ -583,6 +654,12 @@ void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_arr
                 singleproxy["network"] = transproto;
                 singleproxy["ws-path"] = path;
                 singleproxy["ws-headers"]["Host"] = host;
+                singleproxy["headers"]["Host"] = host;
+                if(edge.size())
+                {
+                    singleproxy["ws-headers"]["Edge"] = edge;
+                    singleproxy["headers"]["Edge"] = edge;
+                }
             }
             else if(transproto == "kcp" || transproto == "h2" || transproto == "quic")
                 continue;
@@ -594,7 +671,7 @@ void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_arr
             obfs = GetMember(json, "OBFS");
             if(ext.filter_deprecated)
             {
-                if(method == "chacha20")
+                if(method == "chacha20" && !clashR) //the mainline core no longer supports chacha20, but clashR core still does
                     continue;
                 if(std::find(clashr_protocols.cbegin(), clashr_protocols.cend(), protocol) == clashr_protocols.cend())
                     continue;
@@ -644,7 +721,7 @@ void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_arr
     {
         YAML::Node provider;
         provider["proxies"] = proxies;
-        yamlnode = provider;
+        yamlnode.reset(provider);
         return;
     }
 
@@ -724,21 +801,20 @@ std::string netchToClash(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         return YAML::Dump(yamlnode);
 
     if(ext.enable_rule_generator)
-        rulesetToClash(yamlnode, ruleset_content_array);
+        rulesetToClash(yamlnode, ruleset_content_array, ext.overwrite_original_rules);
 
     return YAML::Dump(yamlnode);
 }
 
 std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, int surge_ver, extra_settings &ext)
 {
-    try_config_lock();
     rapidjson::Document json;
     INIReader ini;
     std::string proxy;
     std::string type, remark, hostname, port, username, password, method;
     std::string plugin, pluginopts;
     std::string protocol, protoparam, obfs, obfsparam;
-    std::string id, aid, transproto, faketype, host, path, quicsecure, quicsecret;
+    std::string id, aid, transproto, faketype, host, edge, path, quicsecure, quicsecret;
     std::string output_nodelist;
     std::vector<nodeInfo> nodelist;
     unsigned short local_port = 1080;
@@ -751,7 +827,7 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
     string_array vArray, remarks_list, filtered_nodelist;
 
     ini.store_any_line = true;
-    if(ini.Parse(base_conf) != 0)
+    if(ini.Parse(base_conf) != 0 && !ext.nodelist)
         return std::string();
 
     ini.SetCurrentSection("Proxy");
@@ -760,12 +836,12 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -785,8 +861,10 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
             x.remarks = "[" + type + "]" + x.remarks;
         remark = x.remarks;
 
-        while(std::count(remarks_list.begin(), remarks_list.end(), remark) > 0)
-            remark = x.remarks = x.remarks + "$";
+        while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
+            x.remarks += "$";
+
+        remark = x.remarks;
         hostname = GetMember(json, "Hostname");
         port = std::to_string((unsigned short)stoi(GetMember(json, "Port")));
         username = GetMember(json, "Username");
@@ -811,18 +889,21 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         }
         else if(x.linkType == SPEEDTEST_MESSAGE_FOUNDVMESS)
         {
-            if(surge_ver < 4)
+            if(surge_ver < 4 && surge_ver != -3)
                 continue;
             id = GetMember(json, "UserID");
             aid = GetMember(json, "AlterID");
             transproto = GetMember(json, "TransferProtocol");
             host = GetMember(json, "Host");
+            edge = GetMember(json, "Edge");
             path = GetMember(json, "Path");
             tlssecure = GetMember(json, "TLSSecure") == "true";
             proxy = "vmess, " + hostname + ", " + port + ", username=" + id + ", tls=" + (tlssecure ? "true" : "false");
             if(transproto == "ws")
             {
                 proxy += ", ws=true, ws-path=" + path + ", ws-headers=Host:" + host;
+                if(edge.size())
+                    proxy += "|Edge:" + edge;
             }
             if(ext.skip_cert_verify)
                 proxy += ", skip-cert-verify=1";
@@ -919,8 +1000,8 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         {
             if(vArray.size() < 4)
                 continue;
-            proxy = vArray[1] + ",default=" + vArray[2];
-            proxy += std::accumulate(vArray.begin() + 3, vArray.end(), vArray[3], [](std::string a, std::string b)
+            proxy = vArray[1] + ",default=" + vArray[2] + ",";
+            proxy += std::accumulate(vArray.begin() + 4, vArray.end(), vArray[3], [](std::string a, std::string b)
             {
                 return std::move(a) + "," + std::move(b);
             });
@@ -952,7 +1033,7 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
     }
 
     if(ext.enable_rule_generator)
-        rulesetToSurge(ini, ruleset_content_array, surge_ver);
+        rulesetToSurge(ini, ruleset_content_array, surge_ver, ext.overwrite_original_rules, ext.managed_config_prefix);
 
     return ini.ToString();
 }
@@ -967,12 +1048,12 @@ std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1039,12 +1120,12 @@ std::string netchToSSSub(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1112,12 +1193,12 @@ std::string netchToSSR(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1173,12 +1254,12 @@ std::string netchToVMess(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1219,25 +1300,49 @@ std::string netchToVMess(std::vector<nodeInfo> &nodes, extra_settings &ext)
     return base64_encode(allLinks);
 }
 
-std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
+std::string netchToQuan(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext)
+{
+    INIReader ini;
+    ini.store_any_line = true;
+    if(!ext.nodelist && ini.Parse(base_conf) != 0)
+        return std::string();
+
+    netchToQuan(nodes, ini, ruleset_content_array, extra_proxy_group, ext);
+
+    if(ext.nodelist)
+    {
+        string_array allnodes;
+        ini.GetAll("SERVER", "{NONAME}", allnodes);
+        std::string allLinks = std::accumulate(std::next(allnodes.begin()), allnodes.end(), allnodes[0], [](std::string a, std::string b)
+        {
+            return std::move(a) + "\n" + std::move(b);
+        });
+        return base64_encode(allLinks);
+    }
+    return ini.ToString();
+}
+
+void netchToQuan(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext)
 {
     rapidjson::Document json;
     std::string type;
     std::string remark, hostname, port, method, password;
     std::string plugin, pluginopts;
     std::string protocol, protoparam, obfs, obfsparam;
-    std::string id, aid, transproto, faketype, host, path, quicsecure, quicsecret;
+    std::string id, aid, transproto, faketype, host, edge, path, quicsecure, quicsecret;
     std::string proxyStr, allLinks;
     bool tlssecure;
+    std::vector<nodeInfo> nodelist;
+    string_array remarks_list;
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1248,6 +1353,8 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
         });
     }
 
+    ini.SetCurrentSection("SERVER");
+    ini.EraseSection();
     for(nodeInfo &x : nodes)
     {
         json.Parse(x.proxyStr.data());
@@ -1255,6 +1362,10 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
         if(ext.append_proxy_type)
             x.remarks = "[" + type + "]" + x.remarks;
+
+        while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
+            x.remarks += "$";
+
         remark = x.remarks;
 
         hostname = GetMember(json, "Hostname");
@@ -1270,6 +1381,7 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
             transproto = GetMember(json, "TransferProtocol");
             host = GetMember(json, "Host");
             path = GetMember(json, "Path");
+            edge = GetMember(json, "Edge");
             faketype = GetMember(json, "FakeType");
             tlssecure = GetMember(json, "TLSSecure") == "true";
 
@@ -1278,11 +1390,16 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
             proxyStr = remark + " = vmess, " + hostname + ", " + port + ", " + method + ", \"" + id + "\", group=" + x.group;
             if(tlssecure)
                 proxyStr += ", over-tls=true, tls-host=" + host;
-            if(ext.skip_cert_verify)
-                proxyStr += ", certificate=0";
             if(transproto == "ws")
-                proxyStr += ", obfs=ws, obfs-path=\"" + path + "\", obfs-header=\"Host: " + host + "\"";
-            proxyStr = "vmess://" + urlsafe_base64_encode(proxyStr);
+            {
+                proxyStr += ", obfs=ws, obfs-path=\"" + path + "\", obfs-header=\"Host: " + host;
+                if(edge.size())
+                    proxyStr += "[Rr][Nn]Edge: " + edge;
+                proxyStr += "\"";
+            }
+
+            if(ext.nodelist)
+                proxyStr = "vmess://" + urlsafe_base64_encode(proxyStr);
             break;
         case SPEEDTEST_MESSAGE_FOUNDSSR:
             protocol = GetMember(json, "Protocol");
@@ -1290,30 +1407,146 @@ std::string netchToQuan(std::vector<nodeInfo> &nodes, extra_settings &ext)
             obfs = GetMember(json, "OBFS");
             obfsparam = GetMember(json, "OBFSParam");
 
-            proxyStr = "ssr://" + urlsafe_base64_encode(hostname + ":" + port + ":" + protocol + ":" + method + ":" + obfs + ":" + urlsafe_base64_encode(password) \
-                       + "/?group=" + urlsafe_base64_encode(x.group) + "&remarks=" + urlsafe_base64_encode(remark) \
-                       + "&obfsparam=" + urlsafe_base64_encode(obfsparam) + "&protoparam=" + urlsafe_base64_encode(protoparam));
+            if(ext.nodelist)
+            {
+                proxyStr = "ssr://" + urlsafe_base64_encode(hostname + ":" + port + ":" + protocol + ":" + method + ":" + obfs + ":" + urlsafe_base64_encode(password) \
+                           + "/?group=" + urlsafe_base64_encode(x.group) + "&remarks=" + urlsafe_base64_encode(remark) \
+                           + "&obfsparam=" + urlsafe_base64_encode(obfsparam) + "&protoparam=" + urlsafe_base64_encode(protoparam));
+            }
+            else
+            {
+                proxyStr = remark + " = shadowsocksr, " + hostname + ", " + port + ", " + method + ", \"" + password + "\", group=" + x.group + ", protocol=" + protocol + ", obfs=" + obfs;
+                if(protoparam.size())
+                    proxyStr += ", protocol_param=" + protoparam;
+                if(obfsparam.size())
+                    proxyStr += ", obfs_param=" + obfsparam;
+            }
             break;
         case SPEEDTEST_MESSAGE_FOUNDSS:
             plugin = GetMember(json, "Plugin");
             pluginopts = GetMember(json, "PluginOption");
-            proxyStr = "ss://" + urlsafe_base64_encode(method + ":" + password) + "@" + hostname + ":" + port;
-            if(plugin.size() & pluginopts.size())
+
+            if(ext.nodelist)
             {
-                proxyStr += "/?plugin=" + UrlEncode(plugin + ";" +pluginopts);
+                proxyStr = "ss://" + urlsafe_base64_encode(method + ":" + password) + "@" + hostname + ":" + port;
+                if(plugin.size() && pluginopts.size())
+                {
+                    proxyStr += "/?plugin=" + UrlEncode(plugin + ";" + pluginopts);
+                }
+                proxyStr += "&group=" + urlsafe_base64_encode(x.group) + "#" + UrlEncode(remark);
             }
-            proxyStr += "&group=" + urlsafe_base64_encode(x.group) + "#" + UrlEncode(remark);
+            else
+            {
+                proxyStr = remark + " = shadowsocks, " + hostname + ", " + port + ", " + method + ", \"" + password + "\", group=" + x.group;
+                if(plugin == "simple-obfs" && pluginopts.size())
+                {
+                    proxyStr += ", " + replace_all_distinct(pluginopts, ";", ", ");
+                }
+            }
             break;
         default:
             continue;
         }
-        allLinks += proxyStr + "\n";
+
+        ini.Set("{NONAME}", proxyStr);
+        nodelist.emplace_back(x);
     }
 
-    return base64_encode(allLinks);
+    if(ext.nodelist)
+        return;
+
+    string_array filtered_nodelist;
+    ini.SetCurrentSection("POLICY");
+    ini.EraseSection();
+
+    std::string singlegroup;
+    std::string name, proxies;
+    string_array vArray;
+    for(std::string &x : extra_proxy_group)
+    {
+        eraseElements(filtered_nodelist);
+        unsigned int rules_upper_bound = 0;
+
+        vArray = split(x, "`");
+        if(vArray.size() < 3)
+            continue;
+
+        if(vArray[1] == "select")
+        {
+            type = "static";
+            rules_upper_bound = vArray.size();
+        }
+        else if(vArray[1] == "url-test")
+        {
+            if(vArray.size() < 5)
+                continue;
+            type = "auto";
+            rules_upper_bound = vArray.size() - 2;
+        }
+        else if(vArray[1] == "fallback")
+        {
+            if(vArray.size() < 5)
+                continue;
+            type = "static";
+            rules_upper_bound = vArray.size() - 2;
+        }
+        else if(vArray[1] == "load-balance")
+        {
+            if(vArray.size() < 5)
+                continue;
+            type = "balance, round-robin";
+            rules_upper_bound = vArray.size() - 2;
+        }
+        else
+            continue;
+
+        name = vArray[0];
+
+        for(unsigned int i = 2; i < rules_upper_bound; i++)
+            groupGenerate(vArray[i], nodelist, filtered_nodelist, true);
+
+        if(!filtered_nodelist.size())
+            filtered_nodelist.emplace_back("direct");
+
+        proxies = std::accumulate(std::next(filtered_nodelist.begin()), filtered_nodelist.end(), filtered_nodelist[0], [](std::string a, std::string b)
+        {
+            return std::move(a) + "\n" + std::move(b);
+        });
+
+        singlegroup = name + " : " + type;
+        if(type == "static")
+            singlegroup += ", " + filtered_nodelist[0];
+        singlegroup += "\n" + proxies + "\n";
+        ini.Set("{NONAME}", base64_encode(singlegroup));
+    }
+
+    if(ext.enable_rule_generator)
+        rulesetToSurge(ini, ruleset_content_array, -2, ext.overwrite_original_rules, std::string());
 }
 
-std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
+std::string netchToQuanX(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext)
+{
+    INIReader ini;
+    ini.store_any_line = true;
+    if(!ext.nodelist && ini.Parse(base_conf) != 0)
+        return std::string();
+
+    netchToQuanX(nodes, ini, ruleset_content_array, extra_proxy_group, ext);
+
+    if(ext.nodelist)
+    {
+        string_array allnodes;
+        ini.GetAll("server_local", "{NONAME}", allnodes);
+        std::string allLinks = std::accumulate(std::next(allnodes.begin()), allnodes.end(), allnodes[0], [](std::string a, std::string b)
+        {
+            return std::move(a) + "\n" + std::move(b);
+        });
+        return allLinks;
+    }
+    return ini.ToString();
+}
+
+void netchToQuanX(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext)
 {
     rapidjson::Document json;
     std::string type;
@@ -1321,17 +1554,19 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
     std::string password, plugin, pluginopts;
     std::string id, transproto, host, path;
     std::string protocol, protoparam, obfs, obfsparam;
-    std::string proxyStr, allLinks;
+    std::string proxyStr;
     bool tlssecure;
+    std::vector<nodeInfo> nodelist;
+    string_array remarks_list;
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1342,6 +1577,8 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
         });
     }
 
+    ini.SetCurrentSection("server_local");
+    ini.EraseSection();
     for(nodeInfo &x : nodes)
     {
         json.Parse(x.proxyStr.data());
@@ -1349,6 +1586,10 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
 
         if(ext.append_proxy_type)
             x.remarks = "[" + type + "]" + x.remarks;
+
+        while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
+            x.remarks += "$";
+
         remark = x.remarks;
 
         hostname = GetMember(json, "Hostname");
@@ -1367,11 +1608,15 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
                 method = "chacha20-ietf-poly1305";
             proxyStr = "vmess = " + hostname + ":" + port + ", method=" + method + ", password=" + id;
             if(transproto == "ws")
-                proxyStr += ", obfs=ws, obfs-host=" + host + ", obfs-uri=" + path;
+            {
+                if(tlssecure)
+                    proxyStr += ", obfs=wss";
+                else
+                    proxyStr += ", obfs=ws";
+                proxyStr += ", obfs-host=" + host + ", obfs-uri=" + path;
+            }
             else if(tlssecure)
-                proxyStr += ", obfs=over-tls";
-            if(ext.skip_cert_verify)
-                proxyStr += ", certificate=0";
+                proxyStr += ", obfs=over-tls, obfs-host=" + host;
             break;
         case SPEEDTEST_MESSAGE_FOUNDSS:
             password = GetMember(json, "Password");
@@ -1402,10 +1647,92 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, extra_settings &ext)
         if(ext.udp)
             proxyStr += ", udp-relay=true";
         proxyStr += ", tag=" + remark;
-        allLinks += proxyStr + "\n";
+
+        ini.Set("{NONAME}", proxyStr);
+        nodelist.emplace_back(x);
     }
 
-    return allLinks;
+    if(ext.nodelist)
+        return;
+
+    string_multimap original_groups;
+    string_array filtered_nodelist;
+    ini.SetCurrentSection("policy");
+    ini.GetItems(original_groups);
+    ini.EraseSection();
+
+    std::string singlegroup;
+    std::string name, proxies;
+    string_array vArray;
+    for(std::string &x : extra_proxy_group)
+    {
+        eraseElements(filtered_nodelist);
+        unsigned int rules_upper_bound = 0;
+
+        vArray = split(x, "`");
+        if(vArray.size() < 3)
+            continue;
+
+        if(vArray[1] == "select")
+        {
+            type = "static";
+            rules_upper_bound = vArray.size();
+        }
+        else if(vArray[1] == "url-test" || vArray[1] == "fallback")
+        {
+            if(vArray.size() < 5)
+                continue;
+            type = "available";
+            rules_upper_bound = vArray.size() - 2;
+        }
+        else if(vArray[1] == "load-balance")
+        {
+            if(vArray.size() < 5)
+                continue;
+            type = "round-robin";
+            rules_upper_bound = vArray.size() - 2;
+        }
+        else
+            continue;
+
+        name = vArray[0];
+
+        for(unsigned int i = 2; i < rules_upper_bound; i++)
+            groupGenerate(vArray[i], nodelist, filtered_nodelist, true);
+
+        if(!filtered_nodelist.size())
+            filtered_nodelist.emplace_back("direct");
+
+        auto iter = std::find_if(original_groups.begin(), original_groups.end(), [name](const string_multimap::value_type &n)
+        {
+            std::string groupdata = n.second;
+            std::string::size_type cpos = groupdata.find(",");
+            if(cpos != std::string::npos)
+                return trim(groupdata.substr(0, cpos)) == name;
+            else
+                return false;
+        });
+        if(iter != original_groups.end())
+        {
+            vArray = split(iter->second, ",");
+            if(vArray.size() > 1)
+            {
+                if(trim(vArray[vArray.size() - 1]).find("img-url") == 0)
+                    filtered_nodelist.emplace_back(trim(vArray[vArray.size() - 1]));
+            }
+        }
+
+        proxies = std::accumulate(std::next(filtered_nodelist.begin()), filtered_nodelist.end(), filtered_nodelist[0], [](std::string a, std::string b)
+        {
+            return std::move(a) + ", " + std::move(b);
+        });
+
+        singlegroup = type + "=" + name + ", " + proxies;
+        ini.Set("{NONAME}", singlegroup);
+    }
+
+    if(ext.enable_rule_generator)
+        rulesetToSurge(ini, ruleset_content_array, -1, ext.overwrite_original_rules, ext.managed_config_prefix);
 }
 
 std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_settings &ext)
@@ -1435,12 +1762,12 @@ std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_s
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1537,7 +1864,6 @@ std::string netchToMellow(std::vector<nodeInfo> &nodes, std::string &base_conf, 
 
 void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext)
 {
-    try_config_lock();
     rapidjson::Document json;
     std::string proxy;
     std::string type, remark, hostname, port, username, password, method;
@@ -1551,12 +1877,12 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
 
     std::for_each(nodes.begin(), nodes.end(), [ext](nodeInfo &x)
     {
-        x.remarks = nodeRename(x.remarks);
+        x.remarks = nodeRename(x.remarks, ext.rename_array);
         if(ext.remove_emoji)
             x.remarks = trim(removeEmoji(x.remarks));
 
         if(ext.add_emoji)
-            x.remarks = addEmoji(x.remarks);
+            x.remarks = addEmoji(x.remarks, ext.emoji_array);
     });
 
     if(ext.sort_flag)
@@ -1677,7 +2003,7 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
             proxy += y + ":";
         proxy = proxy.substr(0, proxy.size() - 1);
         */
-        proxy += std::accumulate(std::next(filtered_nodelist.cbegin()), filtered_nodelist.cend(), filtered_nodelist[0], [](std::string a, std::string b)
+        proxy += std::accumulate(std::next(filtered_nodelist.begin()), filtered_nodelist.end(), filtered_nodelist[0], [](std::string a, std::string b)
         {
             return std::move(a) + ":" + std::move(b);
         });
@@ -1687,8 +2013,7 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
     }
 
     if(ext.enable_rule_generator)
-        rulesetToSurge(ini, ruleset_content_array, 2);
-    ini.RenameSection("Rule", "RoutingRule");
+        rulesetToSurge(ini, ruleset_content_array, 0, ext.overwrite_original_rules, std::string());
 }
 
 std::string buildGistData(std::string name, std::string content)

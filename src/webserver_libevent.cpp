@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <iostream>
 #include <evhttp.h>
+#include <atomic>
 #ifdef MALLOC_TRIM
 #include <malloc.h>
 #endif // MALLOC_TRIM
@@ -15,6 +16,9 @@
 #include "misc.h"
 #include "webserver.h"
 #include "socket.h"
+
+extern std::string user_agent_str;
+std::atomic_bool SERVER_EXIT_FLAG(false);
 
 struct responseRoute
 {
@@ -69,12 +73,19 @@ void OnReq(evhttp_request *req, void *args)
 {
     const char *req_content_type = evhttp_find_header(req->input_headers, "Content-Type"), *req_ac_method = evhttp_find_header(req->input_headers, "Access-Control-Request-Method");
     const char *req_method = req_ac_method == NULL ? EVBUFFER_LENGTH(req->input_buffer) == 0 ? "GET" : "POST" : "OPTIONS", *uri = req->uri;
+    const char *user_agent = evhttp_find_header(req->input_headers, "User-Agent");
     char *client_ip;
     u_short client_port;
     evhttp_connection_get_peer(evhttp_request_get_connection(req), &client_ip, &client_port);
     std::cerr<<"Accept connection from client "<<client_ip<<":"<<client_port<<"\n";
     int retVal;
     std::string postdata, content_type, return_data;
+
+    if(user_agent != NULL && user_agent_str.compare(user_agent) == 0)
+    {
+        evhttp_send_error(req, 500, "Loop request detected!");
+        return;
+    }
 
     if(EVBUFFER_LENGTH(req->input_buffer) != 0)
     {
@@ -169,6 +180,7 @@ int start_web_server(void *argv)
 void* httpserver_dispatch(void *arg)
 {
     event_base_dispatch((struct event_base*)arg);
+    event_base_free((struct event_base*)arg);
     return NULL;
 }
 
@@ -185,6 +197,9 @@ int httpserver_bindsocket(std::string listen_address, int listen_port, int backl
 
     int one = 1;
     ret = setsockopt(nfd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(int));
+#ifdef SO_NOSIGPIPE
+    ret = setsockopt(nfd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&one, sizeof(int));
+#endif
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -223,12 +238,13 @@ int start_web_server_multi(void *argv)
         return -1;
 
     pthread_t ths[nthreads];
+    struct event_base *base[nthreads];
     for (i = 0; i < nthreads; i++)
     {
-        struct event_base *base = event_init();
-        if (base == NULL)
+        base[i] = event_init();
+        if (base[i] == NULL)
             return -1;
-        struct evhttp *httpd = evhttp_new(base);
+        struct evhttp *httpd = evhttp_new(base[i]);
         if (httpd == NULL)
             return -1;
         ret = evhttp_accept_socket(httpd, nfd);
@@ -237,14 +253,22 @@ int start_web_server_multi(void *argv)
 
         evhttp_set_allowed_methods(httpd, EVHTTP_REQ_GET | EVHTTP_REQ_POST | EVHTTP_REQ_OPTIONS);
         evhttp_set_gencb(httpd, OnReq, nullptr);
-        ret = pthread_create(&ths[i], NULL, httpserver_dispatch, base);
+        ret = pthread_create(&ths[i], NULL, httpserver_dispatch, base[i]);
         if (ret != 0)
             return -1;
     }
-    while(true)
-        sleep(10000); //block forever
+    while(!SERVER_EXIT_FLAG)
+        sleep(200); //block forever until receive stop signal
+
+    for (i = 0; i < nthreads; i++)
+        event_base_loopbreak(base[i]);
 
     return 0;
+}
+
+void stop_web_server()
+{
+    SERVER_EXIT_FLAG = true;
 }
 
 void append_response(std::string method, std::string uri, std::string content_type, response_callback response)
