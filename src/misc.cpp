@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iosfwd>
 #include <iostream>
+#include <cstdio>
 //#include <filesystem>
 #include <unistd.h>
 
@@ -141,8 +142,8 @@ unsigned char FromHex(unsigned char x)
 std::string UrlEncode(const std::string& str)
 {
     std::string strTemp = "";
-    size_t length = str.length();
-    for (size_t i = 0; i < length; i++)
+    string_size length = str.length();
+    for (string_size i = 0; i < length; i++)
     {
         if (isalnum((unsigned char)str[i]) ||
                 (str[i] == '-') ||
@@ -150,8 +151,6 @@ std::string UrlEncode(const std::string& str)
                 (str[i] == '.') ||
                 (str[i] == '~'))
             strTemp += str[i];
-        //else if (str[i] == ' ')
-        //    strTemp += "+";
         else
         {
             strTemp += '%';
@@ -165,8 +164,8 @@ std::string UrlEncode(const std::string& str)
 std::string UrlDecode(const std::string& str)
 {
     std::string strTemp;
-    size_t length = str.length();
-    for (size_t i = 0; i < length; i++)
+    string_size length = str.length();
+    for (string_size i = 0; i < length; i++)
     {
         if (str[i] == '+')
             strTemp += ' ';
@@ -248,16 +247,19 @@ std::string base64_decode(const std::string &encoded_string, bool accept_urlsafe
     string_size in_len = encoded_string.size();
     string_size i = 0;
     string_size in_ = 0;
-    unsigned char char_array_4[4], char_array_3[3];
+    unsigned char char_array_4[4], char_array_3[3], uchar = 0;
     static unsigned char dtable[256], itable[256], table_ready = 0;
     std::string ret;
 
     // Should not need thread_local with the flag...
-    if (!table_ready) {
+    if (!table_ready)
+    {
         // No memset needed for static/TLS
-        for (string_size k = 0; k < base64_chars.length(); k++) {
-            dtable[base64_chars[k]] = k;  // decode (find)
-            itable[base64_chars[k]] = 1;  // is_base64
+        for (string_size k = 0; k < base64_chars.length(); k++)
+        {
+            uchar = base64_chars[k]; // make compiler happy
+            dtable[uchar] = k;  // decode (find)
+            itable[uchar] = 1;  // is_base64
         }
         // Add urlsafe table
         dtable['-'] = dtable['+']; itable['-'] = 2;
@@ -265,10 +267,12 @@ std::string base64_decode(const std::string &encoded_string, bool accept_urlsafe
         table_ready = 1;
     }
 
-    while (in_len-- && (encoded_string[in_] != '=') &&
-           (accept_urlsafe ? itable[encoded_string[in_]] : (itable[encoded_string[in_]] == 1)))
+    while (in_len-- && (encoded_string[in_] != '='))
     {
-        char_array_4[i++] = encoded_string[in_];
+        uchar = encoded_string[in_]; // make compiler happy
+        if (!(accept_urlsafe ? itable[uchar] : (itable[uchar] == 1))) // break away from the while condition
+            continue;
+        char_array_4[i++] = uchar;
         in_++;
         if (i == 4)
         {
@@ -652,7 +656,6 @@ std::string urlsafe_base64_encode(const std::string &string_to_encode)
 
 std::string getMD5(const std::string &data)
 {
-
     std::string result;
     unsigned int i = 0;
     unsigned char digest[16] = {};
@@ -684,11 +687,9 @@ std::string getMD5(const std::string &data)
 }
 
 // TODO: Add preprocessor option to disable (open web service safety)
-std::string fileGet(const std::string &path, bool binary, bool scope_limit)
+std::string fileGet(const std::string &path, bool scope_limit)
 {
-    std::ifstream infile;
-    std::stringstream strstrm;
-    std::ios::openmode mode = binary ? std::ios::binary : std::ios::in;
+    std::string content;
 
     if(scope_limit)
     {
@@ -701,15 +702,31 @@ std::string fileGet(const std::string &path, bool binary, bool scope_limit)
 #endif // _WIN32
     }
 
+    std::FILE *fp = std::fopen(path.c_str(), "rb");
+    if(fp)
+    {
+        std::fseek(fp, 0, SEEK_END);
+        long tot = std::ftell(fp);
+        char *data = new char[tot + 1];
+        std::rewind(fp);
+        std::fread(&data[0], 1, tot, fp);
+        std::fclose(fp);
+        content.append(data, 0, tot);
+        delete[] data;
+    }
 
-    infile.open(path, mode);
+    /*
+    std::stringstream sstream;
+    std::ifstream infile;
+    infile.open(path, std::ios::binary);
     if(infile)
     {
-        strstrm<<infile.rdbuf();
+        sstream<<infile.rdbuf();
         infile.close();
-        return strstrm.str();
+        content = sstream.str();
     }
-    return std::string();
+    */
+    return content;
 }
 
 bool fileExist(const std::string &path)
@@ -744,20 +761,21 @@ bool fileCopy(const std::string &source, const std::string &dest)
 
 std::string fileToBase64(const std::string &filepath)
 {
-    return base64_encode(fileGet(filepath, true));
+    return base64_encode(fileGet(filepath));
 }
 
 std::string fileGetMD5(const std::string &filepath)
 {
-    return getMD5(fileGet(filepath, true));
+    return getMD5(fileGet(filepath));
 }
 
 int fileWrite(const std::string &path, const std::string &content, bool overwrite)
 {
     std::fstream outfile;
-    std::ios::openmode mode = overwrite ? std::ios::out : std::ios::app;
+    std::ios_base::openmode mode = overwrite ? std::ios_base::out : std::ios_base::app;
+    mode |= std::ios_base::binary;
     outfile.open(path, mode);
-    outfile << content << std::endl;
+    outfile << content;
     outfile.close();
     return 0;
 }
@@ -845,62 +863,37 @@ bool is_str_utf8(const std::string &data)
     const char *str = data.c_str();
     unsigned int nBytes = 0;
     unsigned char chr;
-    bool bAllAscii = true;
     for (unsigned int i = 0; str[i] != '\0'; ++i)
     {
         chr = *(str + i);
-        if (nBytes == 0 && (chr & 0x80) != 0)
-        {
-            bAllAscii = false;
-        }
         if (nBytes == 0)
         {
             if (chr >= 0x80)
             {
                 if (chr >= 0xFC && chr <= 0xFD)
-                {
                     nBytes = 6;
-                }
                 else if (chr >= 0xF8)
-                {
                     nBytes = 5;
-                }
                 else if (chr >= 0xF0)
-                {
                     nBytes = 4;
-                }
                 else if (chr >= 0xE0)
-                {
                     nBytes = 3;
-                }
                 else if (chr >= 0xC0)
-                {
                     nBytes = 2;
-                }
                 else
-                {
                     return false;
-                }
                 nBytes--;
             }
         }
         else
         {
             if ((chr & 0xC0) != 0x80)
-            {
                 return false;
-            }
             nBytes--;
         }
     }
     if (nBytes != 0)
-    {
         return false;
-    }
-    if (bAllAscii)
-    {
-        return true;
-    }
     return true;
 }
 
@@ -921,15 +914,15 @@ void shortDisassemble(int source, unsigned short &num_a, unsigned short &num_b)
     num_b = (unsigned short)(source >> 16);
 }
 
-int to_int(const std::string &str, int def_vaule)
+int to_int(const std::string &str, int def_value)
 {
     int retval = 0;
     char c;
     std::stringstream ss(str);
     if(!(ss >> retval))
-        return def_vaule;
+        return def_value;
     else if(ss >> c)
-        return def_vaule;
+        return def_value;
     else
         return retval;
 }
@@ -949,19 +942,12 @@ std::string getFormData(const std::string &raw_data)
     while (std::getline(strstrm, line))
     {
         if(i == 0)
-        {
-            // Get boundary
-            boundary = line.substr(0, line.length() - 1);
-        }
+            boundary = line.substr(0, line.length() - 1); // Get boundary
         else if(line.find(boundary) == 0)
-        {
-            // The end
-            break;
-        }
+            break; // The end
         else if(line.length() == 1)
         {
             // Time to get raw data
-
             char c;
             int bl = boundary.length();
             bool endfile = false;

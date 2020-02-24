@@ -8,8 +8,11 @@
 #include <yaml-cpp/yaml.h>
 
 #ifdef _WIN32
+#include <unistd.h>
 #define PATH_SLASH "\\"
 #else
+#include <sys/types.h>
+#include <sys/stat.h>
 #define PATH_SLASH "//"
 #endif // _WIN32
 
@@ -18,9 +21,9 @@ typedef std::vector<std::string> string_array;
 typedef const std::string &refCnstStr;
 
 static const std::string base64_chars =
-             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-             "abcdefghijklmnopqrstuvwxyz"
-             "0123456789+/";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789+/";
 
 std::string UrlEncode(const std::string& str);
 std::string UrlDecode(const std::string& str);
@@ -55,11 +58,10 @@ void urlParse(const std::string &url, std::string &host, std::string &path, int 
 void removeUTF8BOM(std::string &data);
 int shortAssemble(unsigned short num_a, unsigned short num_b);
 void shortDisassemble(int source, unsigned short &num_a, unsigned short &num_b);
-int to_int(const std::string &str, int def_vaule = 0);
 std::string UTF8ToCodePoint(const std::string &data);
 std::string GetEnv(const std::string &name);
 
-std::string fileGet(const std::string &path, bool binary, bool scope_limit = false);
+std::string fileGet(const std::string &path, bool scope_limit = false);
 int fileWrite(const std::string &path, const std::string &content, bool overwrite);
 bool fileExist(const std::string &path);
 bool fileCopy(const std::string &source, const std::string &dest);
@@ -71,11 +73,13 @@ static inline bool strFind(const std::string &str, const std::string &target)
     return str.find(target) != str.npos;
 }
 
-static inline bool startsWith(const std::string &hay, const std::string &needle) {
+static inline bool startsWith(const std::string &hay, const std::string &needle)
+{
     return hay.substr(0, needle.length()) == needle;
 }
 
-static inline bool endsWith(const std::string &hay, const std::string &needle) {
+static inline bool endsWith(const std::string &hay, const std::string &needle)
+{
     std::string::size_type hl = hay.length(), nl = needle.length();
     return hl >= nl && hay.substr(hl - nl, nl) == needle;
 }
@@ -91,17 +95,41 @@ template <typename T> static inline void eraseElements(T &target)
     T().swap(target);
 }
 
+template <typename T> static inline T to_number(const std::string &str, T def_value)
+{
+    T retval = 0.0;
+    char c;
+    std::stringstream ss(str);
+    if(!(ss >> retval))
+        return def_value;
+    else if(ss >> c)
+        return def_value;
+    else
+        return retval;
+}
+
+int to_int(const std::string &str, int def_value = 0);
+
 #ifndef HAVE_TO_STRING
 namespace std
 {
-    template <typename T> std::string to_string(const T& n)
-    {
-        std::ostringstream ss;
-        ss << n;
-        return ss.str();
-    }
+template <typename T> std::string to_string(const T& n)
+{
+    std::ostringstream ss;
+    ss << n;
+    return ss.str();
+}
 }
 #endif // HAVE_TO_STRING
+
+static inline int md(const char *path)
+{
+#ifdef _WIN32
+    return mkdir(path);
+#else
+    return mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+#endif // _WIN32
+}
 
 #ifdef _WIN32
 void StringToWstring(std::wstring& szDst, const std::string &str);

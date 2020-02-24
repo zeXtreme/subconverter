@@ -32,6 +32,7 @@ struct extra_settings
     bool filter_deprecated = false;
     std::string surge_ssr_path;
     std::string managed_config_prefix;
+    std::string quanx_dev_id;
 };
 
 void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset_content_array, bool overwrite_original_rules);
@@ -41,6 +42,7 @@ void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_arr
 std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, int surge_ver, extra_settings &ext);
 std::string netchToMellow(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
+std::string netchToLoon(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext);
 std::string netchToSSSub(std::vector<nodeInfo> &nodes, extra_settings &ext);
 std::string netchToSSR(std::vector<nodeInfo> &nodes, extra_settings &ext);
@@ -49,7 +51,7 @@ std::string netchToQuanX(std::vector<nodeInfo> &nodes, std::string &base_conf, s
 void netchToQuanX(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 std::string netchToQuan(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 void netchToQuan(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
-std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, extra_settings &ext);
+std::string netchToSSD(std::vector<nodeInfo> &nodes, std::string &group, std::string &userinfo, extra_settings &ext);
 std::string buildGistData(std::string name, std::string content);
 int uploadGist(std::string name, std::string path, std::string content, bool writeManageURL);
 
