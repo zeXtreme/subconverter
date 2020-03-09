@@ -15,6 +15,7 @@
 #include "subexport.h"
 #include "multithread.h"
 #include "logger.h"
+#include "string_hash.h"
 
 //common settings
 std::string pref_path = "pref.ini";
@@ -26,6 +27,7 @@ bool api_mode = true, write_managed_config = false, enable_rule_generator = true
 bool print_debug_info = false, cfw_child_process = false, append_userinfo = true, enable_base_gen = false;
 std::string access_token;
 extern std::string custom_group;
+extern int global_log_level;
 
 //generator settings
 bool generator_mode = false;
@@ -247,6 +249,7 @@ void readGroup(YAML::Node node, string_array &dest)
 
     for(i = 0; i < node.size(); i++)
     {
+        name.clear();
         eraseElements(tempArray);
         object = node[i];
         object["import"] >> name;
@@ -290,7 +293,8 @@ void readRuleset(YAML::Node node, string_array &dest)
 
     for(unsigned int i = 0; i < node.size(); i++)
     {
-        name = "";
+        url.clear();
+        name.clear();
         object = node[i];
         object["import"] >> name;
         if(name.size())
@@ -342,14 +346,16 @@ void refreshRulesets(string_array &ruleset_list, std::vector<ruleset_content> &r
         rule_url = trim(x.substr(x.find(",") + 1));
         if(rule_url.find("[]") == 0)
         {
-            std::cerr<<"Adding rule '"<<rule_url.substr(2)<<","<<rule_group<<"'."<<std::endl;
+            writeLog(0, "Adding rule '" + rule_url.substr(2) + "," + rule_group + "'.", LOG_LEVEL_INFO);
+            //std::cerr<<"Adding rule '"<<rule_url.substr(2)<<","<<rule_group<<"'."<<std::endl;
             rc = {rule_group, "", rule_url};
             rca.emplace_back(rc);
             continue;
         }
         else
         {
-            std::cerr<<"Updating ruleset url '"<<rule_url<<"' with group '"<<rule_group<<"'."<<std::endl;
+            //std::cerr<<"Updating ruleset url '"<<rule_url<<"' with group '"<<rule_group<<"'."<<std::endl;
+            writeLog(0, "Updating ruleset url '" + rule_url + "' with group '" + rule_group + "'.", LOG_LEVEL_INFO);
             if(fileExist(rule_url))
             {
                 rc = {rule_group, rule_url, fileGet(rule_url)};
@@ -364,7 +370,8 @@ void refreshRulesets(string_array &ruleset_list, std::vector<ruleset_content> &r
         if(rc.rule_content.size())
             rca.emplace_back(rc);
         else
-            std::cerr<<"Warning: No data was fetched from this link. Skipping..."<<std::endl;
+            //std::cerr<<"Warning: No data was fetched from this link. Skipping..."<<std::endl;
+            writeLog(0, "Warning: No data was fetched from ruleset '" + rule_url + "'. Skipping...", LOG_LEVEL_WARNING);
     }
 }
 
@@ -418,13 +425,13 @@ void readYAMLConf(YAML::Node &node)
         section = node["userinfo"];
         if(section["stream_rule"].IsSequence())
         {
-            readRegexMatch(section["stream_rule"], "@", tempArray);
+            readRegexMatch(section["stream_rule"], "|", tempArray);
             safe_set_streams(tempArray);
             eraseElements(tempArray);
         }
         if(section["time_rule"].IsSequence())
         {
-            readRegexMatch(section["time_rule"], "@", tempArray);
+            readRegexMatch(section["time_rule"], "|", tempArray);
             safe_set_times(tempArray);
             eraseElements(tempArray);
         }
@@ -503,7 +510,34 @@ void readYAMLConf(YAML::Node &node)
 
     if(node["advanced"].IsDefined())
     {
+        std::string log_level;
+        node["advanced"]["log_level"] >> log_level;
         node["advanced"]["print_debug_info"] >> print_debug_info;
+        if(print_debug_info)
+            global_log_level = LOG_LEVEL_VERBOSE;
+        else
+        {
+            switch(hash_(log_level))
+            {
+            case "warn"_hash:
+                global_log_level = LOG_LEVEL_WARNING;
+                break;
+            case "error"_hash:
+                global_log_level = LOG_LEVEL_ERROR;
+                break;
+            case "fatal"_hash:
+                global_log_level = LOG_LEVEL_FATAL;
+                break;
+            case "verbose"_hash:
+                global_log_level = LOG_LEVEL_VERBOSE;
+                break;
+            case "debug"_hash:
+                global_log_level = LOG_LEVEL_DEBUG;
+                break;
+            default:
+                global_log_level = LOG_LEVEL_INFO;
+            }
+        }
         node["advanced"]["max_pending_connections"] >> max_pending_connections;
         node["advanced"]["max_concurrent_threads"] >> max_concurrent_threads;
         node["advanced"]["enable_base_gen"] >> enable_base_gen;
@@ -524,7 +558,8 @@ void readYAMLConf(YAML::Node &node)
 void readConf()
 {
     guarded_mutex guard(on_configuring);
-    std::cerr<<"Reading preference settings..."<<std::endl;
+    //std::cerr<<"Reading preference settings..."<<std::endl;
+    writeLog(0, "Reading preference settings...", LOG_LEVEL_INFO);
 
     eraseElements(def_exclude_remarks);
     eraseElements(def_include_remarks);
@@ -548,7 +583,8 @@ void readConf()
     int retVal = ini.ParseFile(pref_path);
     if(retVal != INIREADER_EXCEPTION_NONE)
     {
-        std::cerr<<"Unable to load preference settings. Reason: "<<ini.GetLastError()<<"\n";
+        //std::cerr<<"Unable to load preference settings. Reason: "<<ini.GetLastError()<<"\n";
+        writeLog(0, "Unable to load preference settings. Reason: " + ini.GetLastError(), LOG_LEVEL_FATAL);
         return;
     }
 
@@ -699,8 +735,36 @@ void readConf()
         listen_port = ini.GetInt("port");
 
     ini.EnterSection("advanced");
+    std::string log_level;
+    if(ini.ItemExist("log_level"))
+        log_level = ini.Get("log_level");
     if(ini.ItemExist("print_debug_info"))
         print_debug_info = ini.GetBool("print_debug_info");
+    if(print_debug_info)
+        global_log_level = LOG_LEVEL_VERBOSE;
+    else
+    {
+        switch(hash_(log_level))
+        {
+        case "warn"_hash:
+            global_log_level = LOG_LEVEL_WARNING;
+            break;
+        case "error"_hash:
+            global_log_level = LOG_LEVEL_ERROR;
+            break;
+        case "fatal"_hash:
+            global_log_level = LOG_LEVEL_FATAL;
+            break;
+        case "verbose"_hash:
+            global_log_level = LOG_LEVEL_VERBOSE;
+            break;
+        case "debug"_hash:
+            global_log_level = LOG_LEVEL_DEBUG;
+            break;
+        default:
+            global_log_level = LOG_LEVEL_INFO;
+        }
+    }
     if(ini.ItemExist("max_pending_connections"))
         max_pending_connections = ini.GetInt("max_pending_connections");
     if(ini.ItemExist("max_concurrent_threads"))
@@ -722,7 +786,8 @@ void readConf()
             cache_subscription = cache_config = cache_ruleset = 0; //disable cache
     }
 
-    std::cerr<<"Read preference settings completed."<<std::endl;
+    //std::cerr<<"Read preference settings completed."<<std::endl;
+    writeLog(0, "Read preference settings completed.", LOG_LEVEL_INFO);
 }
 
 struct ExternalConfig
@@ -808,7 +873,8 @@ int loadExternalConfig(std::string &path, ExternalConfig &ext)
     ini.SetIsolatedItemsSection("custom");
     if(ini.Parse(base_content) != INIREADER_EXCEPTION_NONE)
     {
-        std::cerr<<"Load external configuration failed. Reason: "<<ini.GetLastError()<<"\n";
+        //std::cerr<<"Load external configuration failed. Reason: "<<ini.GetLastError()<<"\n";
+        writeLog(0, "Load external configuration failed. Reason: " + ini.GetLastError(), LOG_LEVEL_ERROR);
         return -1;
     }
 
@@ -867,7 +933,8 @@ void generateBase()
     if(!enable_base_gen)
         return;
     std::string base_content;
-    std::cerr<<"Generating base content for Clash/R...\n";
+    //std::cerr<<"Generating base content for Clash/R...\n";
+    writeLog(0, "Generating base content for Clash/R...", LOG_LEVEL_INFO);
     if(fileExist(clash_rule_base))
         base_content = fileGet(clash_rule_base);
     else
@@ -879,7 +946,8 @@ void generateBase()
     }
     catch (YAML::Exception &e)
     {
-        std::cerr<<"Unable to load Clash base content. Reason: "<<e.msg<<"\n";
+        //std::cerr<<"Unable to load Clash base content. Reason: "<<e.msg<<"\n";
+        writeLog(0, "Unable to load Clash base content. Reason: " + e.msg, LOG_LEVEL_ERROR);
     }
     // mellow base generate removed for now
     /*
@@ -981,7 +1049,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     //load external configuration
     if(config.size())
     {
-        std::cerr<<"External configuration file provided. Loading...\n";
+        //std::cerr<<"External configuration file provided. Loading...\n";
+        writeLog(0, "External configuration file provided. Loading...", LOG_LEVEL_INFO);
         //read predefined data first
         extra_group = clash_extra_group;
         extra_ruleset = rulesets;
@@ -1091,7 +1160,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     for(std::string &x : urls)
     {
         x = trim(x);
-        std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
+        //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
+        writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
         if(addNodes(x, nodes, groupID, proxy, exclude_remarks, include_remarks, stream_temp, time_temp, subInfo, authorized) == -1)
         {
             *status_code = 400;
@@ -1117,10 +1187,11 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     string_array dummy_group;
     std::vector<ruleset_content> dummy_ruleset;
 
-    std::cerr<<"Generate target: ";
+    //std::cerr<<"Generate target: ";
     if(target == "clash" || target == "clashr")
     {
-        std::cerr<<"Clash"<<((target == "clashr") ? "R" : "")<<std::endl;
+        //std::cerr<<"Clash"<<((target == "clashr") ? "R" : "")<<std::endl;
+        writeLog(0, target == "clashr" ? "Generate target: ClashR" : "Generate target: Clash", LOG_LEVEL_INFO);
         if(ext.nodelist)
         {
             YAML::Node yamlnode;
@@ -1149,7 +1220,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     else if(target == "surge")
     {
         int surge_ver = version.size() ? to_int(version, 3) : 3;
-        std::cerr<<"Surge "<<surge_ver<<std::endl;
+        //std::cerr<<"Surge "<<surge_ver<<std::endl;
+        writeLog(0, "Generate target: Surge " + std::to_string(surge_ver), LOG_LEVEL_INFO);
 
         if(ext.nodelist)
         {
@@ -1173,7 +1245,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "surfboard")
     {
-        std::cerr<<"Surfboard"<<std::endl;
+        //std::cerr<<"Surfboard"<<std::endl;
+        writeLog(0, "Generate target: Surfboard", LOG_LEVEL_INFO);
         if(fileExist(ext_surfboard_base))
             base_content = fileGet(ext_surfboard_base);
         else
@@ -1189,7 +1262,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "mellow")
     {
-        std::cerr<<"Mellow"<<std::endl;
+        //std::cerr<<"Mellow"<<std::endl;
+        writeLog(0, "Generate target: Mellow", LOG_LEVEL_INFO);
         // mellow base generator removed for now
         //if(ruleset_updated || update_ruleset_on_request || ext_mellow_base != mellow_rule_base || !enable_base_gen)
         {
@@ -1215,7 +1289,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "ss")
     {
-        std::cerr<<"SS"<<std::endl;
+        //std::cerr<<"SS"<<std::endl;
+        writeLog(0, "Generate target: SS", LOG_LEVEL_INFO);
         output_content = netchToSS(nodes, ext);
         if(upload == "true")
             uploadGist("ss", upload_path, output_content, false);
@@ -1223,28 +1298,32 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "sssub")
     {
-        std::cerr<<"SS Subscription"<<std::endl;
+        //std::cerr<<"SS Subscription"<<std::endl;
+        writeLog(0, "Generate target: SS Subscription", LOG_LEVEL_INFO);
         output_content = netchToSSSub(nodes, ext);
         if(upload == "true")
             uploadGist("sssub", upload_path, output_content, false);
     }
     else if(target == "ssr")
     {
-        std::cerr<<"SSR"<<std::endl;
+        //std::cerr<<"SSR"<<std::endl;
+        writeLog(0, "Generate target: SSR", LOG_LEVEL_INFO);
         output_content = netchToSSR(nodes, ext);
         if(upload == "true")
             uploadGist("ssr", upload_path, output_content, false);
     }
     else if(target == "v2ray")
     {
-        std::cerr<<"v2rayN"<<std::endl;
+        //std::cerr<<"v2rayN"<<std::endl;
+        writeLog(0, "Generate target: v2rayN", LOG_LEVEL_INFO);
         output_content = netchToVMess(nodes, ext);
         if(upload == "true")
             uploadGist("v2ray", upload_path, output_content, false);
     }
     else if(target == "quan")
     {
-        std::cerr<<"Quantumult"<<std::endl;
+        //std::cerr<<"Quantumult"<<std::endl;
+        writeLog(0, "Generate target: Quantumult", LOG_LEVEL_INFO);
         if(!ext.nodelist)
         {
             if(fileExist(ext_quan_base))
@@ -1260,7 +1339,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "quanx")
     {
-        std::cerr<<"Quantumult X"<<std::endl;
+        //std::cerr<<"Quantumult X"<<std::endl;
+        writeLog(0, "Generate target: Quantumult X", LOG_LEVEL_INFO);
         if(!ext.nodelist)
         {
             if(fileExist(ext_quanx_base))
@@ -1276,7 +1356,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "loon")
     {
-        std::cerr<<"Loon"<<std::endl;
+        //std::cerr<<"Loon"<<std::endl;
+        writeLog(0, "Generate target: Loon", LOG_LEVEL_INFO);
         if(!ext.nodelist)
         {
             if(fileExist(ext_loon_base))
@@ -1292,17 +1373,20 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     }
     else if(target == "ssd")
     {
-        std::cerr<<"SSD"<<std::endl;
+        //std::cerr<<"SSD"<<std::endl;
+        writeLog(0, "Generate target: SSD", LOG_LEVEL_INFO);
         output_content = netchToSSD(nodes, group, subInfo, ext);
         if(upload == "true")
             uploadGist("ssd", upload_path, output_content, false);
     }
     else
     {
-        std::cerr<<"Unspecified"<<std::endl;
+        //std::cerr<<"Unspecified"<<std::endl;
+        writeLog(0, "Generate target: Unspecified", LOG_LEVEL_INFO);
         *status_code = 500;
         return "Unrecognized target";
     }
+    writeLog(0, "Generate completed.", LOG_LEVEL_INFO);
     if(filename.size())
         extra_headers.emplace("Content-Disposition", "attachment; filename=\"" + filename + "\"");
     return output_content;
@@ -1360,7 +1444,8 @@ std::string simpleToClashR(RESPONSE_CALLBACK_ARGS)
     for(std::string &x : urls)
     {
         x = trim(x);
-        std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
+        //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
+        writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
         if(addNodes(x, nodes, groupID, proxy, exclude_remarks, include_remarks, dummy, dummy, subInfo, false) == -1)
         {
             *status_code = 400;
@@ -1420,14 +1505,16 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS)
     if(ini.Parse(base_content) != INIREADER_EXCEPTION_NONE)
     {
         std::string errmsg = "Parsing Surge config failed! Reason: " + ini.GetLastError();
-        std::cerr<<errmsg<<"\n";
+        //std::cerr<<errmsg<<"\n";
+        writeLog(0, errmsg, LOG_LEVEL_ERROR);
         *status_code = 400;
         return errmsg;
     }
     if(!ini.SectionExist("Proxy") || !ini.SectionExist("Proxy Group") || !ini.SectionExist("Rule"))
     {
         std::string errmsg = "Incomplete surge config! Missing critical sections!";
-        std::cerr<<errmsg<<"\n";
+        //std::cerr<<errmsg<<"\n";
+        writeLog(0, errmsg, LOG_LEVEL_ERROR);
         *status_code = 400;
         return errmsg;
     }
@@ -1476,7 +1563,8 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS)
     std::string subInfo;
     for(std::string &x : links)
     {
-        std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
+        //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
+        writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
         if(addNodes(x, nodes, 0, proxy, dummy_str_array, dummy_str_array, dummy_str_array, dummy_str_array, subInfo, false) == -1)
         {
             *status_code = 400;
@@ -1586,20 +1674,24 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS)
         *status_code = 404;
         return "Profile not found";
     }
-    std::cerr<<"Trying to load profile '" + name + "'.\n";
+    //std::cerr<<"Trying to load profile '" + name + "'.\n";
+    writeLog(0, "Trying to load profile '" + name + "'.", LOG_LEVEL_INFO);
     INIReader ini;
     if(ini.ParseFile(name) != INIREADER_EXCEPTION_NONE && !ini.SectionExist("Profile"))
     {
-        std::cerr<<"Load profile failed! Reason: "<<ini.GetLastError()<<"\n";
+        //std::cerr<<"Load profile failed! Reason: "<<ini.GetLastError()<<"\n";
+        writeLog(0, "Load profile failed! Reason: " + ini.GetLastError(), LOG_LEVEL_ERROR);
         *status_code = 500;
         return "Broken profile!";
     }
-    std::cerr<<"Trying to parse profile '" + name + "'.\n";
+    //std::cerr<<"Trying to parse profile '" + name + "'.\n";
+    writeLog(0, "Trying to parse profile '" + name + "'.", LOG_LEVEL_INFO);
     string_multimap contents;
     ini.GetItems("Profile", contents);
     if(!contents.size())
     {
-        std::cerr<<"Load profile failed! Reason: Empty Profile section\n";
+        //std::cerr<<"Load profile failed! Reason: Empty Profile section\n";
+        writeLog(0, "Load profile failed! Reason: Empty Profile section", LOG_LEVEL_ERROR);
         *status_code = 500;
         return "Broken profile!";
     }
@@ -1697,29 +1789,95 @@ std::string getRewriteRemote(RESPONSE_CALLBACK_ARGS)
     return output_content;
 }
 
+static inline std::string intToStream(unsigned long long stream)
+{
+    char chrs[16] = {};
+    double streamval = stream;
+    int level = 0;
+    while(streamval > 1024.0)
+    {
+        if(level >= 5)
+            break;
+        level++;
+        streamval /= 1024.0;
+    }
+    switch(level)
+    {
+    case 3:
+        snprintf(chrs, 15, "%.2f GB", streamval);
+        break;
+    case 4:
+        snprintf(chrs, 15, "%.2f TB", streamval);
+        break;
+    case 5:
+        snprintf(chrs, 15, "%.2f PB", streamval);
+        break;
+    case 2:
+        snprintf(chrs, 15, "%.2f MB", streamval);
+        break;
+    case 1:
+        snprintf(chrs, 15, "%.2f KB", streamval);
+        break;
+    case 0:
+        snprintf(chrs, 15, "%.2f B", streamval);
+        break;
+    }
+    return std::string(chrs);
+}
+
+std::string subInfoToMessage(std::string subinfo)
+{
+    typedef unsigned long long ull;
+    subinfo = replace_all_distinct(subinfo, "; ", "&");
+    std::string retdata, useddata = "N/A", totaldata = "N/A", expirydata = "N/A";
+    std::string upload = getUrlArg(subinfo, "upload"), download = getUrlArg(subinfo, "download"), total = getUrlArg(subinfo, "total"), expire = getUrlArg(subinfo, "expire");
+    ull used = to_number<ull>(upload, 0) + to_number<ull>(download, 0), tot = to_number<ull>(total, 0);
+    time_t expiry = to_number<time_t>(expire, 0);
+    if(used != 0)
+        useddata = intToStream(used);
+    if(tot != 0)
+        totaldata = intToStream(tot);
+    if(expiry != 0)
+    {
+        char buffer[30];
+        struct tm *dt = localtime(&expiry);
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", dt);
+        expirydata.assign(buffer);
+    }
+    if(useddata == "N/A" && totaldata == "N/A" && expirydata == "N/A")
+        retdata = "Not Available";
+    else
+        retdata += "Stream Used: " + useddata + " Stream Total: " + totaldata + " Expiry Time: " + expirydata;
+    return retdata;
+}
 
 int simpleGenerator()
 {
-    std::cerr<<"\nReading generator configuration...\n";
+    //std::cerr<<"\nReading generator configuration...\n";
+    writeLog(0, "Reading generator configuration...", LOG_LEVEL_INFO);
     std::string config = fileGet("generate.ini"), path, profile, arguments, content;
     if(config.empty())
     {
-        std::cerr<<"Generator configuration not found or empty!\n";
+        //std::cerr<<"Generator configuration not found or empty!\n";
+        writeLog(0, "Generator configuration not found or empty!", LOG_LEVEL_ERROR);
         return -1;
     }
 
     INIReader ini;
     if(ini.Parse(config) != INIREADER_EXCEPTION_NONE)
     {
-        std::cerr<<"Generator configuration broken! Reason:"<<ini.GetLastError()<<"\n";
+        //std::cerr<<"Generator configuration broken! Reason:"<<ini.GetLastError()<<"\n";
+        writeLog(0, "Generator configuration broken! Reason:" + ini.GetLastError(), LOG_LEVEL_ERROR);
         return -2;
     }
-    std::cerr<<"Read generator configuration completed.\n\n";
+    //std::cerr<<"Read generator configuration completed.\n\n";
+    writeLog(0, "Read generator configuration completed.\n", LOG_LEVEL_INFO);
 
     string_array sections = ini.GetSections();
     if(gen_profile.size())
     {
-        std::cerr<<"Generating with specific artifacts: \""<<gen_profile<<"\"...\n";
+        //std::cerr<<"Generating with specific artifacts: \""<<gen_profile<<"\"...\n";
+        writeLog(0, "Generating with specific artifacts: \"" + gen_profile + "\"...", LOG_LEVEL_INFO);
         string_array targets = split(gen_profile, ","), new_targets;
         for(std::string &x : targets)
         {
@@ -1728,7 +1886,8 @@ int simpleGenerator()
                 new_targets.emplace_back(x);
             else
             {
-                std::cerr<<"Artifact \""<<x<<"\" not found in generator settings!\n";
+                //std::cerr<<"Artifact \""<<x<<"\" not found in generator settings!\n";
+                writeLog(0, "Artifact \"" + x + "\" not found in generator settings!", LOG_LEVEL_ERROR);
                 return -3;
             }
         }
@@ -1736,32 +1895,63 @@ int simpleGenerator()
         sections.shrink_to_fit();
     }
     else
-        std::cerr<<"Generating all artifacts...\n";
+        //std::cerr<<"Generating all artifacts...\n";
+        writeLog(0, "Generating all artifacts...", LOG_LEVEL_INFO);
 
     string_multimap allItems;
     std::string dummy_str;
-    std::map<std::string, std::string> dummy_map;
+    std::map<std::string, std::string> headers;
     int ret_code = 200;
     for(std::string &x : sections)
     {
         arguments.clear();
         ret_code = 200;
-        std::cerr<<"Generating artifact '"<<x<<"'...\n";
+        //std::cerr<<"Generating artifact '"<<x<<"'...\n";
+        writeLog(0, "Generating artifact '" + x + "'...", LOG_LEVEL_INFO);
         ini.EnterSection(x);
         if(ini.ItemExist("path"))
             path = ini.Get("path");
         else
         {
-            std::cerr<<"Artifact '"<<x<<"' output path missing! Skipping...\n\n";
+            //std::cerr<<"Artifact '"<<x<<"' output path missing! Skipping...\n\n";
+            writeLog(0, "Artifact '" + x + "' output path missing! Skipping...\n", LOG_LEVEL_ERROR);
             continue;
         }
         if(ini.ItemExist("profile"))
         {
             profile = ini.Get("profile");
-            content = getProfile("name=" + UrlEncode(profile) + "&token=" + access_token + "&expand=true", dummy_str, &ret_code, dummy_map);
+            content = getProfile("name=" + UrlEncode(profile) + "&token=" + access_token + "&expand=true", dummy_str, &ret_code, headers);
         }
         else
         {
+            if(ini.GetBool("direct") == true)
+            {
+                std::string url = ini.Get("url");
+                if(fileExist(url))
+                    content = fileGet(url, false);
+                else
+                {
+                    //check for proxy settings
+                    std::string proxy;
+                    if(proxy_subscription == "SYSTEM")
+                        proxy = getSystemProxy();
+                    else if(proxy_subscription == "NONE")
+                        proxy = "";
+                    else
+                        proxy = proxy_subscription;
+                    content = webGet(url, proxy);
+                }
+                if(content.empty())
+                {
+                    //std::cerr<<"Artifact '"<<x<<"' generate ERROR! Please check your link.\n\n";
+                    writeLog(0, "Artifact '" + x + "' generate ERROR! Please check your link.\n", LOG_LEVEL_ERROR);
+                    if(sections.size() == 1)
+                        return -1;
+                }
+                // add UTF-8 BOM
+                fileWrite(path, "\xEF\xBB\xBF" + content, true);
+                continue;
+            }
             ini.GetItems(allItems);
             allItems.emplace("expand", "true");
             for(auto &y : allItems)
@@ -1771,16 +1961,30 @@ int simpleGenerator()
                 arguments += y.first + "=" + UrlEncode(y.second) + "&";
             }
             arguments.erase(arguments.size() - 1);
-            content = subconverter(arguments, dummy_str, &ret_code, dummy_map);
+            content = subconverter(arguments, dummy_str, &ret_code, headers);
         }
         if(ret_code != 200)
         {
-            std::cerr<<"Artifact '"<<x<<"' generate ERROR! Reason: "<<content<<"\n\n";
+            //std::cerr<<"Artifact '"<<x<<"' generate ERROR! Reason: "<<content<<"\n\n";
+            writeLog(0, "Artifact '" + x + "' generate ERROR! Reason: " + content + "\n", LOG_LEVEL_ERROR);
+            if(sections.size() == 1)
+                return -1;
             continue;
         }
         fileWrite(path, content, true);
-        std::cerr<<"Artifact '"<<x<<"' generate SUCCESS!\n\n";
+        for(auto &y : headers)
+        {
+            if(regMatch(y.first, "(?i)Subscription-UserInfo"))
+            {
+                std::cerr<<"User Info for artifact '"<<x<<"': "<<subInfoToMessage(y.second)<<"\n";
+                break;
+            }
+        }
+        //std::cerr<<"Artifact '"<<x<<"' generate SUCCESS!\n\n";
+        writeLog(0, "Artifact '" + x + "' generate SUCCESS!\n", LOG_LEVEL_INFO);
+        eraseElements(headers);
     }
-    std::cerr<<"All artifact generated. Exiting...\n";
+    //std::cerr<<"All artifact generated. Exiting...\n";
+    writeLog(0, "All artifact generated. Exiting...", LOG_LEVEL_INFO);
     return 0;
 }

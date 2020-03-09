@@ -8,6 +8,7 @@
 #include "multithread.h"
 #include "socket.h"
 #include "string_hash.h"
+#include "logger.h"
 
 #include <algorithm>
 #include <iostream>
@@ -402,10 +403,17 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset
         while(getline(strStrm, strLine, delimiter))
         {
             lineSize = strLine.size();
+            /*
             if(lineSize && strLine[lineSize - 1] == '\r') //remove line break
             {
                 strLine.erase(lineSize - 1);
                 lineSize--;
+            }
+            */
+            if(lineSize)
+            {
+                strLine = regTrim(strLine);
+                lineSize = strLine.size();
             }
             if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
                 continue;
@@ -541,10 +549,17 @@ void rulesetToSurge(INIReader &base_rule, std::vector<ruleset_content> &ruleset_
             while(getline(strStrm, strLine, delimiter))
             {
                 lineSize = strLine.size();
+                /*
                 if(lineSize && strLine[lineSize - 1] == '\r') //remove line break
                 {
                     strLine.erase(lineSize - 1);
                     lineSize--;
+                }
+                */
+                if(lineSize)
+                {
+                    strLine = regTrim(strLine);
+                    lineSize = strLine.size();
                 }
                 if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
                     continue;
@@ -677,7 +692,7 @@ void netchToClash(std::vector<nodeInfo> &nodes, YAML::Node &yamlnode, string_arr
 
         type = GetMember(json, "Type");
         if(ext.append_proxy_type)
-            x.remarks = "[" + type + "]" + x.remarks;
+            x.remarks = "[" + type + "] " + x.remarks;
 
         while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
             x.remarks += "$";
@@ -928,6 +943,7 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
     ini.store_any_line = true;
     // filter out sections that requires direct-save
     ini.AddDirectSaveSection("Rule");
+    ini.AddDirectSaveSection("MITM");
     ini.AddDirectSaveSection("Script");
     ini.AddDirectSaveSection("URL Rewrite");
     ini.AddDirectSaveSection("Header Rewrite");
@@ -962,7 +978,7 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
         type = GetMember(json, "Type");
 
         if(ext.append_proxy_type)
-            x.remarks = "[" + type + "]" + x.remarks;
+            x.remarks = "[" + type + "] " + x.remarks;
         remark = x.remarks;
 
         while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
@@ -1466,7 +1482,7 @@ void netchToQuan(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rules
         type = GetMember(json, "Type");
 
         if(ext.append_proxy_type)
-            x.remarks = "[" + type + "]" + x.remarks;
+            x.remarks = "[" + type + "] " + x.remarks;
 
         while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
             x.remarks += "$";
@@ -1692,7 +1708,7 @@ void netchToQuanX(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rule
         type = GetMember(json, "Type");
 
         if(ext.append_proxy_type)
-            x.remarks = "[" + type + "]" + x.remarks;
+            x.remarks = "[" + type + "] " + x.remarks;
 
         while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
             x.remarks += "$";
@@ -2083,7 +2099,7 @@ void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<rul
         type = GetMember(json, "Type");
 
         if(ext.append_proxy_type)
-            x.remarks = "[" + type + "]" + x.remarks;
+            x.remarks = "[" + type + "] " + x.remarks;
         remark = x.remarks;
 
         while(std::count(remarks_list.begin(), remarks_list.end(), remark) > 0)
@@ -2254,7 +2270,7 @@ std::string netchToLoon(std::vector<nodeInfo> &nodes, std::string &base_conf, st
         type = GetMember(json, "Type");
 
         if(ext.append_proxy_type)
-            x.remarks = "[" + type + "]" + x.remarks;
+            x.remarks = "[" + type + "] " + x.remarks;
         remark = x.remarks;
 
         while(std::count(remarks_list.begin(), remarks_list.end(), x.remarks) > 0)
@@ -2445,21 +2461,24 @@ int uploadGist(std::string name, std::string path, std::string content, bool wri
 
     if(!fileExist("gistconf.ini"))
     {
-        std::cerr<<"gistconf.ini not found. Skipping...\n";
+        //std::cerr<<"gistconf.ini not found. Skipping...\n";
+        writeLog(0, "gistconf.ini not found. Skipping...", LOG_LEVEL_ERROR);
         return -1;
     }
 
     ini.ParseFile("gistconf.ini");
     if(ini.EnterSection("common") != 0)
     {
-        std::cerr<<"gistconf.ini has incorrect format. Skipping...\n";
+        //std::cerr<<"gistconf.ini has incorrect format. Skipping...\n";
+        writeLog(0, "gistconf.ini has incorrect format. Skipping...", LOG_LEVEL_ERROR);
         return -1;
     }
 
     token = ini.Get("token");
     if(!token.size())
     {
-        std::cerr<<"No token is provided. Skipping...\n";
+        //std::cerr<<"No token is provided. Skipping...\n";
+        writeLog(0, "No token is provided. Skipping...", LOG_LEVEL_ERROR);
         return -1;
     }
 
@@ -2475,24 +2494,28 @@ int uploadGist(std::string name, std::string path, std::string content, bool wri
 
     if(!id.size())
     {
-        std::cerr<<"No gist id is provided. Creating new gist...\n";
-        retVal = curlPost("https://api.github.com/gists", buildGistData(path, content), getSystemProxy(), token, &retData);
+        //std::cerr<<"No gist id is provided. Creating new gist...\n";
+        writeLog(0, "No Gist id is provided. Creating new Gist...", LOG_LEVEL_ERROR);
+        retVal = webPost("https://api.github.com/gists", buildGistData(path, content), getSystemProxy(), token, &retData);
         if(retVal != 201)
         {
-            std::cerr<<"Create new Gist failed! Return data:\n"<<retData<<"\n";
+            //std::cerr<<"Create new Gist failed! Return data:\n"<<retData<<"\n";
+            writeLog(0, "Create new Gist failed! Return data:\n" + retData, LOG_LEVEL_ERROR);
             return -1;
         }
     }
     else
     {
         url = "https://gist.githubusercontent.com/" + username + "/" + id + "/raw/" + path;
-        std::cerr<<"Gist id provided. Modifying gist...\n";
+        //std::cerr<<"Gist id provided. Modifying Gist...\n";
+        writeLog(0, "Gist id provided. Modifying Gist...", LOG_LEVEL_INFO);
         if(writeManageURL)
             content = "#!MANAGED-CONFIG " + url + "\n" + content;
-        retVal = curlPatch("https://api.github.com/gists/" + id, buildGistData(path, content), getSystemProxy(), token, &retData);
+        retVal = webPatch("https://api.github.com/gists/" + id, buildGistData(path, content), getSystemProxy(), token, &retData);
         if(retVal != 200)
         {
-            std::cerr<<"Modify gist failed! Return data:\n"<<retData<<"\n";
+            //std::cerr<<"Modify gist failed! Return data:\n"<<retData<<"\n";
+            writeLog(0, "Modify Gist failed! Return data:\n" + retData, LOG_LEVEL_ERROR);
             return -1;
         }
     }
@@ -2501,7 +2524,8 @@ int uploadGist(std::string name, std::string path, std::string content, bool wri
     if(json.HasMember("owner"))
         GetMember(json["owner"], "login", username);
     url = "https://gist.githubusercontent.com/" + username + "/" + id + "/raw/" + path;
-    std::cerr<<"Writing to Gist success!\nGenerator: "<<name<<"\nPath: "<<path<<"\nRaw URL: "<<url<<"\nGist owner: "<<username<<"\n";
+    //std::cerr<<"Writing to Gist success!\nGenerator: "<<name<<"\nPath: "<<path<<"\nRaw URL: "<<url<<"\nGist owner: "<<username<<"\n";
+    writeLog(0, "Writing to Gist success!\nGenerator: " + name + "\nPath: " + path + "\nRaw URL: " + url + "\nGist owner: " + username, LOG_LEVEL_INFO);
 
     ini.EraseSection();
     ini.Set("token", token);
