@@ -130,7 +130,12 @@ int main(int argc, char *argv[])
 
     append_response("GET", "/", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
-        return std::string("subconverter " VERSION " backend\n");
+        return "subconverter " VERSION " backend\n";
+    });
+
+    append_response("GET", "/version", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
+    {
+        return "subconverter " VERSION " backend\n";
     });
 
     append_response("GET", "/refreshrules", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
@@ -271,6 +276,11 @@ int main(int argc, char *argv[])
     append_response("GET", "/ssd", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
         return subconverter(argument + "&target=ssd", postdata, status_code, extra_headers);
+    });
+
+    append_response("GET", "/trojan", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
+    {
+        return subconverter(argument + "&target=trojan", postdata, status_code, extra_headers);
     });
 
     if(!api_mode)

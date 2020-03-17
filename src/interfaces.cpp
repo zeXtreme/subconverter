@@ -387,21 +387,27 @@ void readYAMLConf(YAML::Node &node)
     {
         section["default_url"] >> tempArray;
         if(tempArray.size())
-            strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(), tempArray[0], [](std::string a, std::string b)
         {
-            return std::move(a) + "|" + std::move(b);
-        });
-        default_url = strLine;
+            strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(), tempArray[0], [](std::string a, std::string b)
+            {
+                return std::move(a) + "|" + std::move(b);
+            });
+            default_url = strLine;
+            eraseElements(tempArray);
+        }
     }
     if(section["insert_url"].IsSequence())
     {
         section["insert_url"] >> tempArray;
         if(tempArray.size())
-            strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(), tempArray[0], [](std::string a, std::string b)
         {
-            return std::move(a) + "|" + std::move(b);
-        });
-        insert_url = strLine;
+            strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(), tempArray[0], [](std::string a, std::string b)
+            {
+                return std::move(a) + "|" + std::move(b);
+            });
+            insert_url = strLine;
+            eraseElements(tempArray);
+        }
     }
     if(section["exclude_remarks"].IsSequence())
         section["exclude_remarks"] >> def_exclude_remarks;
@@ -568,9 +574,13 @@ void readConf()
 
     try
     {
-        YAML::Node yaml = YAML::LoadFile(pref_path);
-        if(yaml.size() && yaml["common"])
-            return readYAMLConf(yaml);
+        std::string prefdata = fileGet(pref_path, false);
+        if(prefdata.find("common:") != prefdata.npos)
+        {
+            YAML::Node yaml = YAML::Load(prefdata);
+            if(yaml.size() && yaml["common"])
+                return readYAMLConf(yaml);
+        }
     }
     catch (YAML::Exception &e)
     {
@@ -1159,7 +1169,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     string_array stream_temp = safe_get_streams(), time_temp = safe_get_times();
     for(std::string &x : urls)
     {
-        x = trim(x);
+        x = regTrim(x);
         //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
         writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
         if(addNodes(x, nodes, groupID, proxy, exclude_remarks, include_remarks, stream_temp, time_temp, subInfo, authorized) == -1)
@@ -1188,8 +1198,10 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     std::vector<ruleset_content> dummy_ruleset;
 
     //std::cerr<<"Generate target: ";
-    if(target == "clash" || target == "clashr")
+    int surge_ver;
+    switch(hash_(target))
     {
+    case "clash"_hash: case "clashr"_hash:
         //std::cerr<<"Clash"<<((target == "clashr") ? "R" : "")<<std::endl;
         writeLog(0, target == "clashr" ? "Generate target: ClashR" : "Generate target: Clash", LOG_LEVEL_INFO);
         if(ext.nodelist)
@@ -1216,10 +1228,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
         if(upload == "true")
             uploadGist(target, upload_path, output_content, false);
-    }
-    else if(target == "surge")
-    {
-        int surge_ver = version.size() ? to_int(version, 3) : 3;
+        break;
+    case "surge"_hash:
+        surge_ver = version.size() ? to_int(version, 3) : 3;
         //std::cerr<<"Surge "<<surge_ver<<std::endl;
         writeLog(0, "Generate target: Surge " + std::to_string(surge_ver), LOG_LEVEL_INFO);
 
@@ -1242,9 +1253,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
                 output_content = "#!MANAGED-CONFIG " + managed_config_prefix + "/sub?" + argument + (interval ? " interval=" + std::to_string(interval) : "") \
                  + " strict=" + std::string(strict ? "true" : "false") + "\n\n" + output_content;
         }
-    }
-    else if(target == "surfboard")
-    {
+        break;
+    case "surfboard"_hash:
         //std::cerr<<"Surfboard"<<std::endl;
         writeLog(0, "Generate target: Surfboard", LOG_LEVEL_INFO);
         if(fileExist(ext_surfboard_base))
@@ -1259,9 +1269,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         if(write_managed_config && managed_config_prefix.size())
             output_content = "#!MANAGED-CONFIG " + managed_config_prefix + "/sub?" + argument + (interval ? " interval=" + std::to_string(interval) : "") \
                  + " strict=" + std::string(strict ? "true" : "false") + "\n\n" + output_content;
-    }
-    else if(target == "mellow")
-    {
+        break;
+    case "mellow"_hash:
         //std::cerr<<"Mellow"<<std::endl;
         writeLog(0, "Generate target: Mellow", LOG_LEVEL_INFO);
         // mellow base generator removed for now
@@ -1286,42 +1295,36 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
         if(upload == "true")
             uploadGist("mellow", upload_path, output_content, true);
-    }
-    else if(target == "ss")
-    {
+        break;
+    case "ss"_hash:
         //std::cerr<<"SS"<<std::endl;
         writeLog(0, "Generate target: SS", LOG_LEVEL_INFO);
         output_content = netchToSS(nodes, ext);
         if(upload == "true")
             uploadGist("ss", upload_path, output_content, false);
-        return output_content;
-    }
-    else if(target == "sssub")
-    {
+        break;
+    case "sssub"_hash:
         //std::cerr<<"SS Subscription"<<std::endl;
         writeLog(0, "Generate target: SS Subscription", LOG_LEVEL_INFO);
         output_content = netchToSSSub(nodes, ext);
         if(upload == "true")
             uploadGist("sssub", upload_path, output_content, false);
-    }
-    else if(target == "ssr")
-    {
+        break;
+    case "ssr"_hash:
         //std::cerr<<"SSR"<<std::endl;
         writeLog(0, "Generate target: SSR", LOG_LEVEL_INFO);
         output_content = netchToSSR(nodes, ext);
         if(upload == "true")
             uploadGist("ssr", upload_path, output_content, false);
-    }
-    else if(target == "v2ray")
-    {
+        break;
+    case "v2ray"_hash:
         //std::cerr<<"v2rayN"<<std::endl;
         writeLog(0, "Generate target: v2rayN", LOG_LEVEL_INFO);
         output_content = netchToVMess(nodes, ext);
         if(upload == "true")
             uploadGist("v2ray", upload_path, output_content, false);
-    }
-    else if(target == "quan")
-    {
+        break;
+    case "quan"_hash:
         //std::cerr<<"Quantumult"<<std::endl;
         writeLog(0, "Generate target: Quantumult", LOG_LEVEL_INFO);
         if(!ext.nodelist)
@@ -1336,9 +1339,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
         if(upload == "true")
             uploadGist("quan", upload_path, output_content, false);
-    }
-    else if(target == "quanx")
-    {
+        break;
+    case "quanx"_hash:
         //std::cerr<<"Quantumult X"<<std::endl;
         writeLog(0, "Generate target: Quantumult X", LOG_LEVEL_INFO);
         if(!ext.nodelist)
@@ -1353,9 +1355,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
         if(upload == "true")
             uploadGist("quanx", upload_path, output_content, false);
-    }
-    else if(target == "loon")
-    {
+        break;
+    case "loon"_hash:
         //std::cerr<<"Loon"<<std::endl;
         writeLog(0, "Generate target: Loon", LOG_LEVEL_INFO);
         if(!ext.nodelist)
@@ -1370,17 +1371,22 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
         if(upload == "true")
             uploadGist("loon", upload_path, output_content, false);
-    }
-    else if(target == "ssd")
-    {
+        break;
+    case "ssd"_hash:
         //std::cerr<<"SSD"<<std::endl;
         writeLog(0, "Generate target: SSD", LOG_LEVEL_INFO);
         output_content = netchToSSD(nodes, group, subInfo, ext);
         if(upload == "true")
             uploadGist("ssd", upload_path, output_content, false);
-    }
-    else
-    {
+        break;
+    case "trojan"_hash:
+        //std::cerr<<"Trojan"<<std::endl;
+        writeLog(0, "Generate target: Trojan", LOG_LEVEL_INFO);
+        output_content = netchToTrojan(nodes, ext);
+        if(upload == "true")
+            uploadGist("trojan", upload_path, output_content, false);
+        break;
+    default:
         //std::cerr<<"Unspecified"<<std::endl;
         writeLog(0, "Generate target: Unspecified", LOG_LEVEL_INFO);
         *status_code = 500;
@@ -1664,7 +1670,7 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS)
 std::string getProfile(RESPONSE_CALLBACK_ARGS)
 {
     std::string name = UrlDecode(getUrlArg(argument, "name")), token = UrlDecode(getUrlArg(argument, "token")), expand = getUrlArg(argument, "expand");
-    if(token != access_token)
+    if(token.empty() || name.empty())
     {
         *status_code = 403;
         return "Forbidden";
@@ -1694,6 +1700,24 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS)
         writeLog(0, "Load profile failed! Reason: Empty Profile section", LOG_LEVEL_ERROR);
         *status_code = 500;
         return "Broken profile!";
+    }
+    auto profile_token = contents.find("profile_token");
+    if(profile_token != contents.end())
+    {
+        if(token != profile_token->second)
+        {
+            *status_code = 403;
+            return "Forbidden";
+        }
+        token = access_token;
+    }
+    else
+    {
+        if(token != access_token)
+        {
+            *status_code = 403;
+            return "Forbidden";
+        }
     }
     contents.emplace("token", token);
     contents.emplace("expand", expand);
