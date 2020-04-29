@@ -2,18 +2,11 @@
 DOMAIN-KEYWORD,beplay
 
 # > Blizzard
+USER-AGENT,hearthstone*
+DOMAIN,cdp.cloud.unity3d.com
 DOMAIN-SUFFIX,battle.net
 DOMAIN-SUFFIX,battlenet.com
 DOMAIN-SUFFIX,blizzard.com
-
-# > Microsoft
-DOMAIN-SUFFIX,azure.cn
-DOMAIN-SUFFIX,hotmail.com
-DOMAIN-SUFFIX,msn.com
-DOMAIN-SUFFIX,outlook.com
-DOMAIN-SUFFIX,windows.com
-DOMAIN-SUFFIX,windows.net
-DOMAIN-SUFFIX,windowsupdate.com
 
 # > Prior
 DOMAIN,client.amplifi.com
@@ -68,6 +61,7 @@ DOMAIN-SUFFIX,autonavi.com
 DOMAIN-SUFFIX,aweme.snssdk.com
 DOMAIN-SUFFIX,bababian.com
 DOMAIN-SUFFIX,baidu.com
+DOMAIN-SUFFIX,baidupcs.com
 DOMAIN-SUFFIX,battle.net
 DOMAIN-SUFFIX,bdimg.com
 DOMAIN-SUFFIX,bdstatic.com
@@ -114,6 +108,7 @@ DOMAIN-SUFFIX,fir.im
 DOMAIN-SUFFIX,firefox.com
 DOMAIN-SUFFIX,frdic.com
 DOMAIN-SUFFIX,fresh-ideas.cc
+DOMAIN-SUFFIX,gameloft.com
 DOMAIN-SUFFIX,geetest.com
 DOMAIN-SUFFIX,godic.net
 DOMAIN-SUFFIX,goodread.com
@@ -133,8 +128,6 @@ DOMAIN-SUFFIX,ifeng.com
 DOMAIN-SUFFIX,ifengimg.com
 DOMAIN-SUFFIX,images-amazon.com
 DOMAIN-SUFFIX,img4me.com
-DOMAIN-SUFFIX,ipify.org
-DOMAIN-SUFFIX,ipip.net
 DOMAIN-SUFFIX,ithome.com
 DOMAIN-SUFFIX,ixdzs.com
 DOMAIN-SUFFIX,jd.com
@@ -261,8 +254,6 @@ DOMAIN-SUFFIX,ximalaya.com
 DOMAIN-SUFFIX,xitek.com
 DOMAIN-SUFFIX,xmcdn.com
 DOMAIN-SUFFIX,xslb.net
-DOMAIN-SUFFIX,xteko.com
-DOMAIN-SUFFIX,xunlei.com
 DOMAIN-SUFFIX,yach.me
 DOMAIN-SUFFIX,yeepay.com
 DOMAIN-SUFFIX,yhd.com
@@ -280,3 +271,6 @@ DOMAIN-SUFFIX,zimuzu.tv
 DOMAIN-SUFFIX,zmz002.com
 
 IP-CIDR,1.255.62.0/24,no-resolve
+
+# > CN
+DOMAIN-SUFFIX,cn

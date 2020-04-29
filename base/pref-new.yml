@@ -5,13 +5,16 @@ common:
   insert_url: []
   exclude_remarks: ["(到期|剩余流量|时间|官网|产品)"]
   include_remarks: []
-  clash_rule_base: base/simple_base.yml
-  surge_rule_base: base/surge.conf
-  surfboard_rule_base: base/surfboard.conf
-  mellow_rule_base: base/mellow.conf
-  quan_rule_base: base/quan.conf
-  quanx_rule_base: base/quanx.conf
-  loon_rule_base: base/loon.conf
+  default_external_config: "" # config/example_external_config.yml
+  base_path: base
+  clash_rule_base: base/all_base.tpl
+  surge_rule_base: base/all_base.tpl
+  surfboard_rule_base: base/all_base.tpl
+  mellow_rule_base: base/all_base.tpl
+  quan_rule_base: base/all_base.tpl
+  quanx_rule_base: base/all_base.tpl
+  loon_rule_base: base/all_base.tpl
+  sssub_rule_base: base/all_base.tpl
   proxy_config: SYSTEM
   proxy_ruleset: SYSTEM
   proxy_subscription: NONE
@@ -36,6 +39,8 @@ node_pref:
   sort_flag: false
   skip_cert_verify_flag: false
   filter_deprecated_nodes: false
+  append_sub_userinfo: true
+  clash_use_new_field_name: false
   rename_node:
 #  - {match: "\\(?((x|X)?(\\d+)(\\.?\\d+)?)((\\s?倍率?)|(x|X))\\)?", replace: "$1x"}
   - {import: snippets/rename_node.txt}
@@ -68,13 +73,38 @@ ruleset:
 
 proxy_group:
   custom_proxy_group:
-#  - {name: UrlTest, type: url-test, rule: [".*"], url: http://www.gstatic.com/generate_204, interval: 300}
+#  - {name: UrlTest, type: url-test, rule: [".*"], url: http://www.gstatic.com/generate_204, interval: 300, tolerance: 100, timeout: 5}
 #  - {name: Proxy, type: select, rule: [".*"]}
 #  - {name: group1, type: select, rule: ["!!GROUPID=0"]}
 #  - {name: v2ray, type: select, rule: ["!!GROUP=V2RayProvider"]}
 #  - {import: snippets/groups_forcerule.txt}
 #  - {name: ssid group, type: ssid, rule: ["default_group", "celluar=group0,ssid1=group1,ssid2=group2"]}
   - {import: snippets/groups.txt}
+
+template:
+  template_path: "templates"
+  globals:
+  - {key: clash.http_port, value: 7890}
+  - {key: clash.socks_port, value: 7891}
+  - {key: clash.allow_lan, value: true}
+  - {key: clash.log_level, value: info}
+  
+aliases:
+  - {uri: /v, target: /version}
+  - {uri: /clash, target: "/sub?target=clash"}
+  - {uri: /clashr, target: "/sub?target=clashr"}
+  - {uri: /surge, target: "/sub?target=surge"}
+  - {uri: /quan, target: "/sub?target=quan"}
+  - {uri: /quanx, target: "/sub?target=quanx"}
+  - {uri: /mellow, target: "/sub?target=mellow"}
+  - {uri: /surfboard, target: "/sub?target=surfboard"}
+  - {uri: /loon, target: "/sub?target=loon"}
+  - {uri: /ss, target: "/sub?target=ss"}
+  - {uri: /ssd, target: "/sub?target=ssd"}
+  - {uri: /sssub, target: "/sub?target=sssub"}
+  - {uri: /ssr, target: "/sub?target=ssr"}
+  - {uri: /v2ray, target: "/sub?target=v2ray"}
+  - {uri: /trojan, target: "/sub?target=trojan"}
 
 server:
   listen: 0.0.0.0
@@ -90,3 +120,4 @@ advanced:
   cache_subscription: 60
   cache_config: 300
   cache_ruleset: 21600
+  async_fetch_ruleset: false

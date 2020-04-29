@@ -7,17 +7,6 @@ DOMAIN-SUFFIX,line-cdn.net
 DOMAIN-SUFFIX,line-scdn.net
 DOMAIN-SUFFIX,nhncorp.jp
 
-# > Microsoft
-USER-AGENT,OneDrive*
-DOMAIN-KEYWORD,microsoft
-DOMAIN-KEYWORD,onedrive
-DOMAIN-SUFFIX,azure.com
-DOMAIN-SUFFIX,live.com
-DOMAIN-SUFFIX,live.net
-DOMAIN-SUFFIX,office.com
-DOMAIN-SUFFIX,office.net
-DOMAIN-SUFFIX,skype.com
-
 # > Sony
 DOMAIN-SUFFIX,playstation.com
 DOMAIN-SUFFIX,playstation.net
@@ -51,6 +40,7 @@ DOMAIN-SUFFIX,airtable.com
 DOMAIN-SUFFIX,alfredapp.com
 DOMAIN-SUFFIX,allconnected.co
 DOMAIN-SUFFIX,amazon.co
+DOMAIN-SUFFIX,amazon.co.jp
 DOMAIN-SUFFIX,amazon.com
 DOMAIN-SUFFIX,amazonaws.com
 DOMAIN-SUFFIX,ampproject.com
@@ -120,6 +110,7 @@ DOMAIN-SUFFIX,box.net
 DOMAIN-SUFFIX,boxun.com
 DOMAIN-SUFFIX,cachefly.net
 DOMAIN-SUFFIX,cbc.ca
+DOMAIN-SUFFIX,cdn.angruo.com
 DOMAIN-SUFFIX,cdn.segment.com
 DOMAIN-SUFFIX,cdnst.net
 DOMAIN-SUFFIX,celestrak.com
@@ -204,7 +195,6 @@ DOMAIN-SUFFIX,fzlm.net
 DOMAIN-SUFFIX,g.co
 DOMAIN-SUFFIX,gabia.net
 DOMAIN-SUFFIX,garena.com
-DOMAIN-SUFFIX,gameloft.com
 DOMAIN-SUFFIX,geni.us
 DOMAIN-SUFFIX,get.how
 DOMAIN-SUFFIX,getcloudapp.com
@@ -241,6 +231,7 @@ DOMAIN-SUFFIX,hockeyapp.net
 DOMAIN-SUFFIX,homedepot.com
 DOMAIN-SUFFIX,hootsuite.com
 DOMAIN-SUFFIX,howtoforge.com
+DOMAIN-SUFFIX,i-cable.com
 DOMAIN-SUFFIX,iam.soy
 DOMAIN-SUFFIX,icoco.com
 DOMAIN-SUFFIX,icons8.com
@@ -366,6 +357,7 @@ DOMAIN-SUFFIX,polymer-project.org
 DOMAIN-SUFFIX,popo.tw
 DOMAIN-SUFFIX,potato.im
 DOMAIN-SUFFIX,redd.it
+DOMAIN-SUFFIX,rthk.hk
 DOMAIN-SUFFIX,prfct.co
 DOMAIN-SUFFIX,proxfree.com
 DOMAIN-SUFFIX,psiphon3.com
@@ -585,6 +577,7 @@ DOMAIN-SUFFIX,xclient.info
 DOMAIN-SUFFIX,xda-developers.com
 DOMAIN-SUFFIX,xeeno.com
 DOMAIN-SUFFIX,xiti.com
+DOMAIN-SUFFIX,xteko.com
 DOMAIN-SUFFIX,xuite.net
 DOMAIN-SUFFIX,xvideos.com
 DOMAIN-SUFFIX,yahoo.com
@@ -611,6 +604,8 @@ DOMAIN-SUFFIX,zeutch.com
 DOMAIN-SUFFIX,zynamics.com
 
 # > Force some domains which are fucked by GFW while resolving DNS,or do not respect the system Proxy
+USER-AGENT,WhatsApp*
+
 DOMAIN-KEYWORD,appledaily
 DOMAIN-KEYWORD,beetalk
 DOMAIN-KEYWORD,blogspot

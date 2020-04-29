@@ -30,6 +30,7 @@ struct responseRoute
 };
 
 std::vector<responseRoute> responses;
+string_map redirect_map;
 
 static inline void buffer_cleanup(struct evbuffer *eb)
 {
@@ -66,6 +67,21 @@ static inline int process_request(const char *method_str, std::string uri, std::
             content_type = x.content_type;
             return 0;
         }
+    }
+
+    auto iter = redirect_map.find(path);
+    if(iter != redirect_map.end())
+    {
+        return_data = iter->second;
+        if(arguments.size())
+        {
+            if(return_data.find("?") != return_data.npos)
+                return_data += "&" + arguments;
+            else
+                return_data += "?" + arguments;
+        }
+        content_type = "REDIRECT";
+        return 0;
     }
 
     return -1;
@@ -187,7 +203,7 @@ int start_web_server(void *argv)
 void* httpserver_dispatch(void *arg)
 {
     event_base_dispatch((struct event_base*)arg);
-    event_base_free((struct event_base*)arg);
+    event_base_free((struct event_base*)arg); //free resources
     return NULL;
 }
 
@@ -269,10 +285,8 @@ int start_web_server_multi(void *argv)
         sleep(200); //block forever until receive stop signal
 
     for (i = 0; i < nthreads; i++)
-    {
         event_base_loopbreak(base[i]); //stop the loop
-        event_base_free(base[i]); //free resources
-    }
+
     closesocket(nfd); //close listener socket
 
     return 0;
@@ -291,4 +305,14 @@ void append_response(std::string method, std::string uri, std::string content_ty
     rr.content_type = content_type;
     rr.rc = response;
     responses.emplace_back(rr);
+}
+
+void append_redirect(std::string uri, std::string target)
+{
+    redirect_map[uri] = target;
+}
+
+void reset_redirect()
+{
+    eraseElements(redirect_map);
 }
