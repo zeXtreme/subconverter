@@ -26,6 +26,7 @@ string_array def_exclude_remarks, def_include_remarks, rulesets, stream_rules, t
 std::vector<ruleset_content> ruleset_content_array;
 std::string listen_address = "127.0.0.1", default_url, insert_url, managed_config_prefix;
 int listen_port = 25500, max_pending_connections = 10, max_concurrent_threads = 4;
+bool prepend_insert_url = true;
 bool api_mode = true, write_managed_config = false, enable_rule_generator = true, update_ruleset_on_request = false, overwrite_original_rules = true;
 bool print_debug_info = false, cfw_child_process = false, append_userinfo = true, enable_base_gen = false, async_fetch_ruleset = false;
 std::string access_token, base_path = "base";
@@ -47,7 +48,8 @@ std::mutex on_configuring;
 //preferences
 string_array renames, emojis;
 bool add_emoji = false, remove_old_emoji = false, append_proxy_type = false, filter_deprecated = true;
-bool udp_flag = false, tfo_flag = false, scv_flag = false, do_sort = false, config_update_strict = false;
+tribool udp_flag, tfo_flag, scv_flag, enable_insert;
+bool do_sort = false, config_update_strict = false;
 bool clash_use_new_field_name = false;
 std::string proxy_config, proxy_ruleset, proxy_subscription;
 int config_update_interval = 0;
@@ -136,7 +138,7 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS)
         switch(type_int)
         {
         case 2:
-            if(!std::any_of(quanx_rule_type.begin(), quanx_rule_type.end(), [&strLine](std::string type){return startsWith(strLine, type);}) || startsWith(strLine, "IP-CIDR6"))
+            if(!std::any_of(quanx_rule_type.begin(), quanx_rule_type.end(), [&strLine](std::string type){return startsWith(strLine, type);}))
                 continue;
             break;
         case 1:
@@ -153,7 +155,7 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS)
             switch(hash_(vArray[0]))
             {
             case "DOMAIN-SUFFIX"_hash:
-                strLine = "  - '." + vArray[1] + "'";
+                strLine = "  - '." + vArray[1] + "'\n  - '" + vArray[1] + "'";
                 break;
             case "DOMAIN"_hash:
                 strLine = "  - '" + vArray[1] + "'";
@@ -204,6 +206,8 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS)
         {
             if(type_int == 2)
             {
+                if(startsWith(strLine, "IP-CIDR6"))
+                    strLine.replace(0, 8, "IP6-CIDR");
                 strLine += "," + group;
                 if(std::count(strLine.begin(), strLine.end(), ',') > 2 && regReplace(strLine, rule_match_regex, "$2") == ",no-resolve")
                     strLine = regReplace(strLine, rule_match_regex, "$1$3$2");
@@ -483,6 +487,7 @@ void readYAMLConf(YAML::Node &node)
             eraseElements(tempArray);
         }
     }
+    enable_insert = safe_as<std::string>(section["enable_insert"]);
     if(section["insert_url"].IsSequence())
     {
         section["insert_url"] >> tempArray;
@@ -490,12 +495,13 @@ void readYAMLConf(YAML::Node &node)
         {
             strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(), tempArray[0], [](std::string a, std::string b)
             {
-                return std::move(b) + "|" + std::move(a); // add in reverse order
+                return std::move(a) + "|" + std::move(b);
             });
             insert_url = strLine;
             eraseElements(tempArray);
         }
     }
+    section["prepend_insert_url"] >> prepend_insert_url;
     if(section["exclude_remarks"].IsSequence())
         section["exclude_remarks"] >> def_exclude_remarks;
     if(section["include_remarks"].IsSequence())
@@ -536,10 +542,15 @@ void readYAMLConf(YAML::Node &node)
     if(node["node_pref"].IsDefined())
     {
         section = node["node_pref"];
+        /*
         section["udp_flag"] >> udp_flag;
         section["tcp_fast_open_flag"] >> tfo_flag;
-        section["sort_flag"] >> do_sort;
         section["skip_cert_verify_flag"] >> scv_flag;
+        */
+        udp_flag.set(safe_as<std::string>(section["udp_flag"]));
+        tfo_flag.set(safe_as<std::string>(section["tcp_fast_open_flag"]));
+        scv_flag.set(safe_as<std::string>(section["skip_cert_verify_flag"]));
+        section["sort_flag"] >> do_sort;
         section["filter_deprecated_nodes"] >> filter_deprecated;
         section["append_sub_userinfo"] >> append_userinfo;
         section["clash_use_new_field_name"] >> clash_use_new_field_name;
@@ -725,13 +736,9 @@ void readConf()
     ini.GetBoolIfExist("api_mode", api_mode);
     ini.GetIfExist("api_access_token", access_token);
     ini.GetIfExist("default_url", default_url);
+    enable_insert = ini.Get("enable_insert");
     ini.GetIfExist("insert_url", insert_url);
-    tempArray = split(insert_url, "|");
-    if(tempArray.size())
-        insert_url = std::accumulate(std::next(tempArray.begin()), tempArray.end(), tempArray[0], [](std::string a, std::string b)
-        {
-            return std::move(b) + "|" + std::move(a);
-        });
+    ini.GetBoolIfExist("prepend_insert_url", prepend_insert_url);
     if(ini.ItemPrefixExist("exclude_remarks"))
         ini.GetAll("exclude_remarks", def_exclude_remarks);
     if(ini.ItemPrefixExist("include_remarks"))
@@ -759,10 +766,15 @@ void readConf()
     if(ini.SectionExist("node_pref"))
     {
         ini.EnterSection("node_pref");
+        /*
         ini.GetBoolIfExist("udp_flag", udp_flag);
         ini.GetBoolIfExist("tcp_fast_open_flag", tfo_flag);
-        ini.GetBoolIfExist("sort_flag", do_sort);
         ini.GetBoolIfExist("skip_cert_verify_flag", scv_flag);
+        */
+        udp_flag.set(ini.Get("udp_flag"));
+        tfo_flag.set(ini.Get("tcp_fast_open_flag"));
+        scv_flag.set(ini.Get("skip_cert_verify_flag"));
+        ini.GetBoolIfExist("sort_flag", do_sort);
         ini.GetBoolIfExist("filter_deprecated_nodes", filter_deprecated);
         ini.GetBoolIfExist("append_sub_userinfo", append_userinfo);
         ini.GetBoolIfExist("clash_use_new_field_name", clash_use_new_field_name);
@@ -1119,6 +1131,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     std::string include = UrlDecode(getUrlArg(argument, "include")), exclude = UrlDecode(getUrlArg(argument, "exclude"));
     std::string groups = urlsafe_base64_decode(getUrlArg(argument, "groups")), ruleset = urlsafe_base64_decode(getUrlArg(argument, "ruleset")), config = UrlDecode(getUrlArg(argument, "config"));
     std::string dev_id = getUrlArg(argument, "dev_id"), filename = getUrlArg(argument, "filename"), interval_str = getUrlArg(argument, "interval"), strict_str = getUrlArg(argument, "strict");
+    std::string ext_rename = UrlDecode(getUrlArg(argument, "rename"));
 
     /// switches with default value
     tribool upload = getUrlArg(argument, "upload"), emoji = getUrlArg(argument, "emoji");
@@ -1126,6 +1139,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     tribool sort_flag = getUrlArg(argument, "sort");
     tribool clash_new_field = getUrlArg(argument, "new_name"), clash_script = getUrlArg(argument, "script"), add_insert = getUrlArg(argument, "insert");
     tribool scv = getUrlArg(argument, "scv"), fdn = getUrlArg(argument, "fdn"), expand = getUrlArg(argument, "expand"), append_sub_userinfo = getUrlArg(argument, "append_info");
+    tribool prepend_insert = getUrlArg(argument, "prepend");
 
     std::string base_content, output_content;
     string_array extra_group, extra_ruleset, include_remarks = def_include_remarks, exclude_remarks = def_exclude_remarks;
@@ -1143,11 +1157,10 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     std::string ext_quan_base = quan_rule_base, ext_quanx_base = quanx_rule_base, ext_loon_base = loon_rule_base, ext_sssub_base = sssub_rule_base;
 
     //validate urls
+    add_insert.define(enable_insert);
     if(!url.size() && (!api_mode || authorized))
         url = default_url;
-    if(insert_url.size() && add_insert)
-        url = insert_url + "|" + url;
-    if(!url.size() || !target.size())
+    if((!url.size() && !(insert_url.size() && add_insert)) || !target.size())
     {
         *status_code = 400;
         return "Invalid request!";
@@ -1176,7 +1189,10 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     std::string proxy = parseProxy(proxy_subscription);
 
     ext.emoji_array = safe_get_emojis();
-    ext.rename_array = safe_get_renames();
+    if(ext_rename.size())
+        ext.rename_array = split(ext_rename, "`");
+    else
+        ext.rename_array = safe_get_renames();
 
     //check other flags
     if(!emoji.is_undef())
@@ -1190,21 +1206,33 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         ext.remove_emoji = remove_old_emoji;
     }
     ext.append_proxy_type = append_type.get(append_proxy_type);
+    if(target == "clash" || target == "clashr")
+        expand.define(true);
 
-    ext.tfo = tfo.get(tfo_flag);
-    ext.udp = udp.get(udp_flag);
+    /// read preference from argument
+    ext.tfo = tfo;
+    ext.udp = udp;
+    ext.skip_cert_verify = scv;
+    /// assign global var if not in argument
+    ext.tfo.define(tfo_flag);
+    ext.udp.define(udp_flag);
+    ext.skip_cert_verify.define(scv_flag);
+
     ext.sort_flag = sort_flag.get(do_sort);
-    ext.skip_cert_verify = scv.get(scv_flag);
     ext.filter_deprecated = fdn.get(filter_deprecated);
     ext.clash_new_field_name = clash_new_field.get(clash_use_new_field_name);
     ext.clash_script = clash_script.get();
+    if(!expand)
+        ext.clash_new_field_name = true;
+    else
+        ext.clash_script = false;
 
     ext.nodelist = nodelist;
     ext.surge_ssr_path = surge_ssr_path;
     ext.quanx_dev_id = dev_id.size() ? dev_id : quanx_script_id;
     ext.enable_rule_generator = enable_rule_generator;
     ext.overwrite_original_rules = overwrite_original_rules;
-    if(expand)
+    if(!expand)
         ext.managed_config_prefix = managed_config_prefix;
 
     //load external configuration
@@ -1301,12 +1329,6 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         }
     }
 
-    //loading urls
-    string_array urls = split(url, "|");
-    std::vector<nodeInfo> nodes;
-    int groupID = 0;
-    groupID -= insert_url.empty() || !add_insert ? 0 : std::count(insert_url.begin(), insert_url.end(), '|') + 1;
-
     //check custom include/exclude settings
     if(include.size() && regValid(include))
         include_remarks = string_array{include};
@@ -1315,6 +1337,29 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
     //start parsing urls
     string_array stream_temp = safe_get_streams(), time_temp = safe_get_times();
+
+    //loading urls
+    string_array urls;
+    std::vector<nodeInfo> nodes, insert_nodes;
+    int groupID = 0;
+    if(insert_url.size() && add_insert)
+    {
+        groupID = -1;
+        urls = split(insert_url, "|");
+        for(std::string &x : urls)
+        {
+            x = regTrim(x);
+            writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
+            if(addNodes(x, insert_nodes, groupID, proxy, exclude_remarks, include_remarks, stream_temp, time_temp, subInfo, authorized) == -1)
+            {
+                *status_code = 400;
+                return std::string("The following link doesn't contain any valid node info: " + x);
+            }
+            groupID--;
+        }
+    }
+    urls = split(url, "|");
+    groupID = 0;
     for(std::string &x : urls)
     {
         x = regTrim(x);
@@ -1328,10 +1373,18 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         groupID++;
     }
     //exit if found nothing
-    if(!nodes.size())
+    if(!nodes.size() && !insert_nodes.size())
     {
         *status_code = 400;
         return "No nodes were found!";
+    }
+    prepend_insert.define(prepend_insert_url);
+    for(nodeInfo &x : insert_nodes)
+    {
+        if(prepend_insert)
+            nodes.emplace(nodes.begin(), x);
+        else
+            nodes.emplace_back(x);
     }
 
     //check custom group name
@@ -1609,7 +1662,7 @@ std::string simpleToClashR(RESPONSE_CALLBACK_ARGS)
         refreshRulesets(rulesets, ruleset_content_array);
     rca = ruleset_content_array;
 
-    extra_settings ext = {true, overwrite_original_rules, safe_get_renames(), safe_get_emojis(), add_emoji, remove_old_emoji, append_proxy_type, udp_flag, tfo_flag, false, do_sort, scv_flag, filter_deprecated, clash_use_new_field_name, "", "", ""};
+    extra_settings ext = {true, overwrite_original_rules, safe_get_renames(), safe_get_emojis(), add_emoji, remove_old_emoji, append_proxy_type, false, do_sort, filter_deprecated, clash_use_new_field_name, false, "", "", ""};
 
     std::string proxy = parseProxy(proxy_subscription);
 
@@ -1787,7 +1840,7 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS)
         return "No nodes were found!";
     }
 
-    extra_settings ext = {true, true, dummy_str_array, dummy_str_array, false, false, false, udp_flag, tfo_flag, false, do_sort, scv_flag, filter_deprecated, clash_use_new_field_name, "", "", ""};
+    extra_settings ext = {true, true, dummy_str_array, dummy_str_array, false, false, false, false, do_sort, filter_deprecated, clash_use_new_field_name, false, "", "", ""};
 
     netchToClash(nodes, clash, dummy_str_array, false, ext);
 
@@ -1873,6 +1926,8 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS)
 std::string getProfile(RESPONSE_CALLBACK_ARGS)
 {
     std::string name = UrlDecode(getUrlArg(argument, "name")), token = UrlDecode(getUrlArg(argument, "token"));
+    string_array profiles = split(name, "|");
+    name = profiles[0];
     if(token.empty() || name.empty())
     {
         *status_code = 403;
@@ -1905,7 +1960,7 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS)
         return "Broken profile!";
     }
     auto profile_token = contents.find("profile_token");
-    if(profile_token != contents.end())
+    if(profiles.size() == 1 && profile_token != contents.end())
     {
         if(token != profile_token->second)
         {
@@ -1921,6 +1976,40 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS)
             *status_code = 403;
             return "Forbidden";
         }
+    }
+    /// check if more than one profile is provided
+    if(profiles.size() > 1)
+    {
+        writeLog(0, "Multiple profiles are provided. Trying to combine profiles...", LOG_TYPE_INFO);
+        std::string all_urls, url;
+        auto iter = contents.find("url");
+        if(iter != contents.end())
+            all_urls = iter->second;
+        for(size_t i = 1; i < profiles.size(); i++)
+        {
+            name = profiles[i];
+            if(!fileExist(name))
+            {
+                writeLog(0, "Ignoring non-exist profile '" + name + "'...", LOG_LEVEL_WARNING);
+                continue;
+            }
+            if(ini.ParseFile(name) != INIREADER_EXCEPTION_NONE && !ini.SectionExist("Profile"))
+            {
+                writeLog(0, "Ignoring broken profile '" + name + "'...", LOG_LEVEL_WARNING);
+                continue;
+            }
+            url = ini.Get("Profile", "url");
+            if(url.size())
+            {
+                all_urls += "|" + url;
+                writeLog(0, "Profile url from '" + name + "' added.", LOG_LEVEL_INFO);
+            }
+            else
+            {
+                writeLog(0, "Profile '" + name + "' does not have url key. Skipping...", LOG_LEVEL_INFO);
+            }
+        }
+        iter->second = all_urls;
     }
 
     contents.emplace("token", token);
@@ -2001,7 +2090,8 @@ std::string getRewriteRemote(RESPONSE_CALLBACK_ARGS)
 
 std::string parseHostname(inja::Arguments &args)
 {
-    std::string data = args.at(0)->get<std::string>();
+    std::string data = args.at(0)->get<std::string>(), hostname;
+    const std::string matcher = R"(^(?i:hostname\s*?=\s*?)(.*?)\s$)";
     string_array urls = split(data, ",");
     if(!urls.size())
         return std::string();
@@ -2010,7 +2100,12 @@ std::string parseHostname(inja::Arguments &args)
     for(std::string &x : urls)
     {
         input_content = webGet(x, proxy, cache_config);
-        output_content += regReplace(input_content, "(?:[\\s\\S]*?)^(?i:hostname\\s*?=\\s*?)(.*?)\\s$(?:[\\s\\S]*)", "$1") + ",";
+        regGetMatch(input_content, matcher, 2, NULL, &hostname);
+        if(hostname.size())
+        {
+            output_content += hostname + ",";
+            hostname.clear();
+        }
     }
     string_array vArray = split(output_content, ",");
     std::set<std::string> hostnames;
