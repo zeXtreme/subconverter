@@ -45,7 +45,7 @@ ADD_EXECUTABLE(subconverter
     src/misc.cpp
     src/multithread.cpp
     src/nodemanip.cpp
-    src/rapidjson_extra.cpp
+    src/script.cpp
     src/speedtestutil.cpp
     src/subexport.cpp
     src/templates.cpp
@@ -101,6 +101,10 @@ TARGET_LINK_LIBRARIES(subconverter ${YAML_CPP_LIBRARY})
     TARGET_LINK_LIBRARIES(subconverter ${PCRE2_LIBRARY})
     ADD_DEFINITIONS(-DPCRE2_STATIC)
 #ENDIF()
+
+FIND_PACKAGE(Duktape REQUIRED)
+INCLUDE_DIRECTORIES(${DUKTAPE_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(subconverter ${DUKTAPE_LIBRARIES})
 
 IF(WIN32)
     TARGET_LINK_LIBRARIES(subconverter wsock32 ws2_32)

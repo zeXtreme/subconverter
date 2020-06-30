@@ -9,10 +9,21 @@
 #include "ini_reader.h"
 #include "nodeinfo.h"
 
+enum ruleset_type
+{
+    RULESET_SURGE,
+    RULESET_QUANX,
+    RULESET_CLASH_DOMAIN,
+    RULESET_CLASH_IPCIDR,
+    RULESET_CLASH_CLASSICAL
+};
+
 struct ruleset_content
 {
     std::string rule_group;
     std::string rule_path;
+    std::string rule_path_typed;
+    int rule_type = RULESET_SURGE;
     std::shared_future<std::string> rule_content;
 };
 
@@ -33,9 +44,11 @@ struct extra_settings
     std::string surge_ssr_path;
     std::string managed_config_prefix;
     std::string quanx_dev_id;
-    tribool udp = false;
-    tribool tfo = false;
-    tribool skip_cert_verify = false;
+    tribool udp = tribool();
+    tribool tfo = tribool();
+    tribool skip_cert_verify = tribool();
+    bool clash_classical_ruleset = false;
+    std::string sort_script = "";
 };
 
 void rulesetToClash(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name);
@@ -48,11 +61,8 @@ std::string netchToSurge(std::vector<nodeInfo> &nodes, std::string &base_conf, s
 std::string netchToMellow(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 void netchToMellow(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 std::string netchToLoon(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
-std::string netchToSS(std::vector<nodeInfo> &nodes, extra_settings &ext);
 std::string netchToSSSub(std::string &base_conf, std::vector<nodeInfo> &nodes, extra_settings &ext);
-std::string netchToSSR(std::vector<nodeInfo> &nodes, extra_settings &ext);
-std::string netchToVMess(std::vector<nodeInfo> &nodes, extra_settings &ext);
-std::string netchToTrojan(std::vector<nodeInfo> &nodes, extra_settings &ext);
+std::string netchToSingle(std::vector<nodeInfo> &nodes, int types, extra_settings &ext);
 std::string netchToQuanX(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 void netchToQuanX(std::vector<nodeInfo> &nodes, INIReader &ini, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
 std::string netchToQuan(std::vector<nodeInfo> &nodes, std::string &base_conf, std::vector<ruleset_content> &ruleset_content_array, string_array &extra_proxy_group, extra_settings &ext);
