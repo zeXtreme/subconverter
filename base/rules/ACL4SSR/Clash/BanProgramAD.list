@@ -99,7 +99,6 @@ DOMAIN-SUFFIX,alipaylog.com
 DOMAIN-SUFFIX,amdc.alipay.com
 DOMAIN-SUFFIX,atanx.alicdn.com
 DOMAIN-SUFFIX,atanx2.alicdn.com
-DOMAIN-SUFFIX,click.mz.simba.taobao.com
 DOMAIN-SUFFIX,fav.simba.taobao.com
 DOMAIN-SUFFIX,g.click.taobao.com
 DOMAIN-SUFFIX,g.tbcdn.cn
@@ -250,14 +249,11 @@ DOMAIN-SUFFIX,ecmc.bdimg.com
 DOMAIN-SUFFIX,eiv.baidu.cn
 DOMAIN-SUFFIX,eiv.baidu.com
 DOMAIN-SUFFIX,em.baidu.com
-DOMAIN-SUFFIX,entry.baidu.cn
-DOMAIN-SUFFIX,entry.baidu.com
 DOMAIN-SUFFIX,ers.baidu.com
 DOMAIN-SUFFIX,f10.baidu.com
 DOMAIN-SUFFIX,fc-.cdn.bcebos.com
 DOMAIN-SUFFIX,fc-feed.cdn.bcebos.com
 DOMAIN-SUFFIX,fclick.baidu.com
-DOMAIN-SUFFIX,feed.baidu.com
 DOMAIN-SUFFIX,fexclick.baidu.com
 DOMAIN-SUFFIX,g.baidu.com
 DOMAIN-SUFFIX,gimg.baidu.com
@@ -335,9 +331,6 @@ DOMAIN-SUFFIX,spcode.baidu.com
 DOMAIN-SUFFIX,stat.v.baidu.com
 DOMAIN-SUFFIX,su.bdimg.com
 DOMAIN-SUFFIX,su.bdstatic.com
-DOMAIN-SUFFIX,t10.baidu.com
-DOMAIN-SUFFIX,t11.baidu.com
-DOMAIN-SUFFIX,t12.baidu.com
 DOMAIN-SUFFIX,tk.baidu.cn
 DOMAIN-SUFFIX,tk.baidu.com
 DOMAIN-SUFFIX,tkweb.baidu.com
@@ -351,8 +344,6 @@ DOMAIN-SUFFIX,uat1.bfsspadserver.8le8le.com
 DOMAIN-SUFFIX,ubmcmm.baidustatic.com
 DOMAIN-SUFFIX,ucstat.baidu.cn
 DOMAIN-SUFFIX,ucstat.baidu.com
-DOMAIN-SUFFIX,ufosdk.baidu.cn
-DOMAIN-SUFFIX,ufosdk.baidu.com
 DOMAIN-SUFFIX,ulic.baidu.com
 DOMAIN-SUFFIX,ulog.imap.baidu.com
 DOMAIN-SUFFIX,union.baidu.cn
@@ -491,7 +482,6 @@ DOMAIN-SUFFIX,bssdl.kugou.com
 DOMAIN-SUFFIX,bssdlbig.kugou.com
 DOMAIN-SUFFIX,d.kugou.com
 DOMAIN-SUFFIX,downmobile.kugou.com
-DOMAIN-SUFFIX,fanxing.kugou.com
 DOMAIN-SUFFIX,gad.kugou.com
 DOMAIN-SUFFIX,game.kugou.com
 DOMAIN-SUFFIX,gamebox.kugou.com
@@ -573,8 +563,11 @@ DOMAIN-SUFFIX,xiuxiu.mobile.meitudata.com
 DOMAIN-SUFFIX,a.market.xiaomi.com
 DOMAIN-SUFFIX,ad.xiaomi.com
 DOMAIN-SUFFIX,ad1.xiaomi.com
+DOMAIN-SUFFIX,adv.sec.intl.miui.com
+DOMAIN-SUFFIX,adv.sec.miui.com
 DOMAIN-SUFFIX,bss.pandora.xiaomi.com
 DOMAIN-SUFFIX,d.g.mi.com
+DOMAIN-SUFFIX,data.mistat.xiaomi.com
 DOMAIN-SUFFIX,de.pandora.xiaomi.com
 DOMAIN-SUFFIX,dvb.pandora.xiaomi.com
 DOMAIN-SUFFIX,jellyfish.pandora.xiaomi.com
@@ -612,12 +605,24 @@ DOMAIN-SUFFIX,s.qd.qingtingfm.com
 
 # QQ
 DOMAIN-KEYWORD,omgmtaw
+DOMAIN,adsmind.apdcdn.tc.qq.com
+DOMAIN,adsmind.gdtimg.com
+DOMAIN,adsmind.tc.qq.com
+DOMAIN,pgdt.gtimg.cn
+DOMAIN,pgdt.gtimg.com
+DOMAIN,pgdt.ugdtimg.com
+DOMAIN,splashqqlive.gtimg.com
+DOMAIN,wa.gtimg.com
+DOMAIN,wxsnsdy.wxs.qq.com
+DOMAIN,wxsnsdythumb.wxs.qq.com
 DOMAIN-SUFFIX,act.qq.com
 DOMAIN-SUFFIX,ad.qun.qq.com
 DOMAIN-SUFFIX,adsfile.qq.com
 DOMAIN-SUFFIX,bugly.qq.com
 DOMAIN-SUFFIX,buluo.qq.com
+DOMAIN-SUFFIX,e.qq.com
 DOMAIN-SUFFIX,gdt.qq.com
+DOMAIN-SUFFIX,l.qq.com
 DOMAIN-SUFFIX,monitor.qq.com
 DOMAIN-SUFFIX,pingma.qq.com
 DOMAIN-SUFFIX,pingtcss.qq.com
@@ -739,7 +744,6 @@ DOMAIN-SUFFIX,adm.zookingsoft.com
 DOMAIN-SUFFIX,bannera.kingsoft-office-service.com
 DOMAIN-SUFFIX,bole.shangshufang.ksosoft.com
 DOMAIN-SUFFIX,counter.kingsoft.com
-DOMAIN-SUFFIX,dl.op.wpscdn.cn
 DOMAIN-SUFFIX,docerad.wps.cn
 DOMAIN-SUFFIX,gou.wps.cn
 DOMAIN-SUFFIX,hoplink.ksosoft.com
@@ -750,7 +754,6 @@ DOMAIN-SUFFIX,ios-informationplatform.wps.cn
 DOMAIN-SUFFIX,minfo.wps.cn
 DOMAIN-SUFFIX,mo.res.wpscdn.cn
 DOMAIN-SUFFIX,news.docer.com
-DOMAIN-SUFFIX,news.op.wpscdn.cn
 DOMAIN-SUFFIX,notify.wps.cn
 DOMAIN-SUFFIX,pc.uf.ksosoft.com
 DOMAIN-SUFFIX,pcfg.wps.cn
@@ -799,7 +802,6 @@ DOMAIN-SUFFIX,gemini.yahoo.com
 DOMAIN-SUFFIX,geo.yahoo.com
 DOMAIN-SUFFIX,js-apac-ss.ysm.yahoo.com
 DOMAIN-SUFFIX,locdrop.query.yahoo.com
-DOMAIN-SUFFIX,m.yap.yahoo.com
 DOMAIN-SUFFIX,onepush.query.yahoo.com
 DOMAIN-SUFFIX,p3p.yahoo.com
 DOMAIN-SUFFIX,partnerads.ysm.yahoo.com
@@ -944,8 +946,6 @@ DOMAIN-SUFFIX,pp2.pptv.com
 DOMAIN-SUFFIX,stat.pptv.com
 
 # QQ Live
-DOMAIN-SUFFIX,aiseet.aa.atianqi.com
-DOMAIN-SUFFIX,aiseet.atianqi.com
 DOMAIN-SUFFIX,btrace.video.qq.com
 DOMAIN-SUFFIX,c.l.qq.com
 DOMAIN-SUFFIX,dp3.qq.com
@@ -1052,7 +1052,6 @@ DOMAIN-SUFFIX,logstat.t.sfht.com
 DOMAIN-SUFFIX,match.rtbidder.net
 DOMAIN-SUFFIX,n-st.vip.com
 DOMAIN-SUFFIX,pop.uusee.com
-DOMAIN-SUFFIX,static.bshare.cn
 DOMAIN-SUFFIX,static.duoshuo.com
 DOMAIN-SUFFIX,t.cr-nielsen.com
 DOMAIN-SUFFIX,terren.cntv.cn

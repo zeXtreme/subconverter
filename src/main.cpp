@@ -17,7 +17,7 @@ extern string_array rulesets;
 extern std::vector<ruleset_content> ruleset_content_array;
 
 #ifndef _WIN32
-void SetConsoleTitle(std::string title)
+void SetConsoleTitle(const std::string &title)
 {
     system(std::string("echo \"\\033]0;" + title + "\\007\\c\"").data());
 }
@@ -99,6 +99,10 @@ void signal_handler(int sig)
 
 int main(int argc, char *argv[])
 {
+#ifndef _DEBUG
+    std::string prgpath = argv[0];
+    setcd(prgpath); //first switch to program directory
+#endif // _DEBUG
     if(fileExist("pref.yml"))
         pref_path = "pref.yml";
     chkArg(argc, argv);
@@ -125,10 +129,6 @@ int main(int argc, char *argv[])
     signal(SIGINT, signal_handler);
 
     SetConsoleTitle("SubConverter " VERSION);
-#ifndef _DEBUG
-    std::string prgpath = argv[0];
-    setcd(prgpath); //first switch to program directory
-#endif // _DEBUG
     readConf();
     if(!update_ruleset_on_request)
         refreshRulesets(rulesets, ruleset_content_array);

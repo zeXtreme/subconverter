@@ -21,11 +21,14 @@ typedef jpcre2::select<char> jp;
 
 #include <rapidjson/document.h>
 
+/*
 #ifdef USE_MBEDTLS
 #include <mbedtls/md5.h>
 #else
 #include <openssl/md5.h>
 #endif // USE_MBEDTLS
+*/
+#include "md5.h"
 
 #include "misc.h"
 
@@ -448,14 +451,34 @@ std::string getSystemProxy()
 #endif // _WIN32
 }
 
-std::string trim_of(const std::string& str, char target)
+void trim_self_of(std::string &str, char target, bool before, bool after)
 {
-    std::string::size_type pos = str.find_first_not_of(target);
+    if (!before && !after)
+        return;
+    std::string::size_type pos = str.size() - 1;
+    if (after)
+        pos = str.find_last_not_of(target);
+    if (pos != std::string::npos)
+        str.erase(pos + 1);
+    if (before)
+        pos = str.find_first_not_of(target);
+    str.erase(0, pos);
+}
+
+std::string trim_of(const std::string& str, char target, bool before, bool after)
+{
+    if (!before && !after)
+        return str;
+    std::string::size_type pos = 0;
+    if (before)
+        pos = str.find_first_not_of(target);
     if (pos == std::string::npos)
     {
         return str;
     }
-    std::string::size_type pos2 = str.find_last_not_of(target);
+    std::string::size_type pos2 = str.size() - 1;
+    if (after)
+        pos2 = str.find_last_not_of(target);
     if (pos2 != std::string::npos)
     {
         return str.substr(pos, pos2 - pos + 1);
@@ -463,14 +486,14 @@ std::string trim_of(const std::string& str, char target)
     return str.substr(pos);
 }
 
-std::string trim(const std::string& str)
+std::string trim(const std::string& str, bool before, bool after)
 {
-    return trim_of(str, ' ');
+    return trim_of(str, ' ', before, after);
 }
 
-std::string trim_quote(const std::string &str)
+std::string trim_quote(const std::string &str, bool before, bool after)
 {
-    return trim_of(str, '\"');
+    return trim_of(str, '\"', before, after);
 }
 
 std::string getUrlArg(const std::string &url, const std::string &request)
@@ -668,7 +691,7 @@ bool regMatch(const std::string &src, const std::string &match)
 bool regFind(const std::string &src, const std::string &match)
 {
     jp::Regex reg;
-    reg.setPattern(match).addModifier("m").addPcre2Option(PCRE2_UTF).compile();
+    reg.setPattern(match).addModifier("m").addPcre2Option(PCRE2_UTF|PCRE2_ALT_BSUX).compile();
     if(!reg)
         return false;
     return reg.match(src, "g");
@@ -677,7 +700,7 @@ bool regFind(const std::string &src, const std::string &match)
 std::string regReplace(const std::string &src, const std::string &match, const std::string &rep, bool global)
 {
     jp::Regex reg;
-    reg.setPattern(match).addModifier("m").addPcre2Option(PCRE2_UTF|PCRE2_MULTILINE).compile();
+    reg.setPattern(match).addModifier("m").addPcre2Option(PCRE2_UTF|PCRE2_MULTILINE|PCRE2_ALT_BSUX).compile();
     if(!reg)
         return src;
     return reg.replace(src, rep, global ? "gx" : "x");
@@ -685,14 +708,15 @@ std::string regReplace(const std::string &src, const std::string &match, const s
 
 bool regValid(const std::string &reg)
 {
-    jp::Regex r(reg);
+    jp::Regex r;
+    r.setPattern(reg).addPcre2Option(PCRE2_UTF|PCRE2_ALT_BSUX).compile();
     return !!r;
 }
 
 int regGetMatch(const std::string &src, const std::string &match, size_t group_count, ...)
 {
     jp::Regex reg;
-    reg.setPattern(match).addModifier("m").addPcre2Option(PCRE2_UTF).compile();
+    reg.setPattern(match).addModifier("m").addPcre2Option(PCRE2_UTF|PCRE2_ALT_BSUX).compile();
     jp::VecNum vec_num;
     jp::RegexMatch rm;
     size_t count = rm.setRegexObject(&reg).setSubject(src).setNumberedSubstringVector(&vec_num).setModifier("g").match();
@@ -768,6 +792,8 @@ std::string urlsafe_base64_encode(const std::string &string_to_encode)
 std::string getMD5(const std::string &data)
 {
     std::string result;
+
+    /*
     unsigned int i = 0;
     unsigned char digest[16] = {};
 
@@ -793,6 +819,14 @@ std::string getMD5(const std::string &data)
         snprintf(tmp, 3, "%02x", digest[i]);
         result += tmp;
     }
+    */
+
+    char result_str[MD5_STRING_SIZE];
+    md5::md5_t md5;
+    md5.process(data.data(), data.size());
+    md5.finish();
+    md5.get_string(result_str);
+    result.assign(result_str);
 
     return result;
 }
@@ -1051,6 +1085,8 @@ void shortDisassemble(int source, unsigned short &num_a, unsigned short &num_b)
 
 int to_int(const std::string &str, int def_value)
 {
+    if(str.empty())
+        return def_value;
     int retval = 0;
     char c;
     std::stringstream ss(str);
@@ -1160,4 +1196,55 @@ std::string toUpper(const std::string &str)
     std::string result;
     std::transform(str.begin(), str.end(), std::back_inserter(result), [](unsigned char c) { return std::toupper(c); });
     return result;
+}
+
+void ProcessEscapeChar(std::string &str)
+{
+    string_size pos = str.find('\\');
+    while(pos != str.npos)
+    {
+        if(pos == str.size())
+            break;
+        switch(str[pos + 1])
+        {
+        case 'n':
+            str.replace(pos, 2, "\n");
+            break;
+        case 'r':
+            str.replace(pos, 2, "\r");
+            break;
+        case 't':
+            str.replace(pos, 2, "\t");
+            break;
+        default:
+            /// ignore others for backward compatibility
+            //str.erase(pos, 1);
+            break;
+        }
+        pos = str.find('\\', pos + 1);
+    }
+}
+
+void ProcessEscapeCharReverse(std::string &str)
+{
+    string_size pos = 0;
+    while(pos < str.size())
+    {
+        switch(str[pos])
+        {
+        case '\n':
+            str.replace(pos, 1, "\\n");
+            break;
+        case '\r':
+            str.replace(pos, 1, "\\r");
+            break;
+        case '\t':
+            str.replace(pos, 1, "\\t");
+            break;
+        default:
+            /// ignore others for backward compatibility
+            break;
+        }
+        pos++;
+    }
 }

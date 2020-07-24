@@ -13,6 +13,14 @@
 
 extern std::string managed_config_prefix;
 
+namespace inja
+{
+    void convert_dot_to_json_pointer(nonstd::string_view dot, std::string& out)
+    {
+        out = std::move(JsonNode(dot, 0).ptr);
+    }
+}
+
 static inline void parse_json_pointer(nlohmann::json &json, const std::string &path, const std::string &value)
 {
     std::string pointer;
@@ -52,6 +60,7 @@ int render_template(const std::string &content, const template_args &vars, std::
     inja::FunctionStorage m_callbacks;
     inja::TemplateStorage m_included_templates;
     inja::ParserConfig m_parser_config;
+    inja::RenderConfig m_render_config;
 
     m_lexer_config.trim_blocks = true;
     m_lexer_config.lstrip_blocks = true;
@@ -99,7 +108,7 @@ int render_template(const std::string &content, const template_args &vars, std::
             parse_json_pointer(data, dest + "." + std::to_string(index), vArray[index]);
         return std::string();
     });
-    m_callbacks.add_callback("join", INJA_VARARGS, [](inja::Arguments &args)
+    m_callbacks.add_callback("join", -1, [](inja::Arguments &args)
     {
         std::string result;
         for(auto iter = args.begin(); iter != args.end(); iter++)
@@ -134,14 +143,14 @@ int render_template(const std::string &content, const template_args &vars, std::
     {
         return endsWith(args.at(0)->get<std::string>(), args.at(1)->get<std::string>());
     });
-    m_callbacks.add_callback("or", INJA_VARARGS, [](inja::Arguments &args)
+    m_callbacks.add_callback("or", -1, [](inja::Arguments &args)
     {
         for(auto iter = args.begin(); iter != args.end(); iter++)
             if((*iter)->get<int>())
                 return true;
         return false;
     });
-    m_callbacks.add_callback("and", INJA_VARARGS, [](inja::Arguments &args)
+    m_callbacks.add_callback("and", -1, [](inja::Arguments &args)
     {
         for(auto iter = args.begin(); iter != args.end(); iter++)
             if(!(*iter)->get<int>())
@@ -160,13 +169,17 @@ int render_template(const std::string &content, const template_args &vars, std::
             return 0;
         }
     });
+    m_callbacks.add_callback("string", 1, [](inja::Arguments &args)
+    {
+        return std::to_string(args.at(0)->get<int>());
+    });
     m_callbacks.add_callback("fetch", 1, template_webGet);
     m_callbacks.add_callback("parseHostname", 1, parseHostname);
     m_parser_config.include_scope_limit = true;
     m_parser_config.include_scope = include_scope;
 
-    inja::Parser parser(m_parser_config, m_lexer_config, m_included_templates);
-    inja::Renderer renderer(m_included_templates, m_callbacks);
+    inja::Parser parser(m_parser_config, m_lexer_config, m_included_templates, m_callbacks);
+    inja::Renderer renderer(m_render_config, m_included_templates, m_callbacks);
 
     try
     {
@@ -188,7 +201,6 @@ const std::string clash_script_template = R"(def main(ctx, md):
   host = md["host"]
 {% for rule in rules %}
 {% if rule.set == "true" %}{% include "group_template" %}{% endif %}
-{% if not rule.keyword == "" %}{% include "keyword_template" %}{% endif %}
 {% endfor %}
 
 {% if exists("geoips") %}  geoips = { {{ geoips }} }
@@ -203,11 +215,12 @@ const std::string clash_script_template = R"(def main(ctx, md):
       return geoips[key]{% endif %}
   return "{{ match_group }}")";
 
-const std::string clash_script_group_template = R"({% if rule.has_domain == "false" and rule.has_ipcidr == "false" %}  if ctx.rule_providers["{{ rule.name }}_classical"].match(md):
+const std::string clash_script_group_template = R"({% if (rule.has_domain == "false" and rule.has_ipcidr == "false") or rule.original == "true" %}  if ctx.rule_providers["{{ rule.name }}"].match(md):
     ctx.log('[Script] matched {{ rule.group }} rule')
     return "{{ rule.group }}"{% else %}{% if rule.has_domain == "true" %}  if ctx.rule_providers["{{ rule.name }}_domain"].match(md):
     ctx.log('[Script] matched {{ rule.group }} DOMAIN rule')
     return "{{ rule.group }}"{% endif %}
+{% if not rule.keyword == "" %}{% include "keyword_template" %}{% endif %}
 {% if rule.has_ipcidr == "true" %}  if ctx.rule_providers["{{ rule.name }}_ipcidr"].match(md):
     ctx.log('[Script] matched {{ rule.group }} IP rule')
     return "{{ rule.group }}"{% endif %}{% endif %})";
@@ -218,15 +231,31 @@ const std::string clash_script_keyword_template = R"(  keywords = [{{ rule.keywo
       ctx.log('[Script] matched {{ rule.group }} DOMAIN-KEYWORD rule')
       return "{{ rule.group }}")";
 
+std::string findFileName(const std::string &path)
+{
+    string_size pos = path.rfind('/');
+    if(pos == path.npos)
+    {
+        pos = path.rfind('\\');
+        if(pos == path.npos)
+            pos = 0;
+    }
+    string_size pos2 = path.rfind('.');
+    if(pos2 < pos || pos2 == path.npos)
+        pos2 = path.size();
+    return path.substr(pos + 1, pos2 - pos - 1);
+}
+
 int renderClashScript(YAML::Node &base_rule, std::vector<ruleset_content> &ruleset_content_array, std::string remote_path_prefix, bool script, bool overwrite_original_rules, bool clash_classical_ruleset)
 {
     nlohmann::json data;
     std::string match_group, geoips, retrieved_rules;
-    std::string strLine, rule_group, rule_path, rule_path_typed, rule_name;
+    std::string strLine, rule_group, rule_path, rule_path_typed, rule_name, old_rule_name;
     std::stringstream strStrm;
     string_array vArray, groups;
     string_map keywords, urls, names;
     std::map<std::string, bool> has_domain, has_ipcidr;
+    std::map<std::string, int> ruleset_interval, rule_type;
     string_array rules;
     int index = 0;
 
@@ -257,50 +286,62 @@ int renderClashScript(YAML::Node &base_rule, std::vector<ruleset_content> &rules
             if(strLine.find("FINAL") == 0)
                 strLine.replace(0, 5, "MATCH");
             strLine += "," + rule_group;
-            if(std::count(strLine.begin(), strLine.end(), ',') > 2)
+            if(count_least(strLine, ',', 3))
                 strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
-            rules.emplace_back(strLine);
+            rules.emplace_back(std::move(strLine));
             continue;
         }
         else
         {
             if(x.rule_type == RULESET_CLASH_IPCIDR || x.rule_type == RULESET_CLASH_DOMAIN || x.rule_type == RULESET_CLASH_CLASSICAL)
             {
-                rule_name = std::to_string(hash_(rule_group + rule_path));
+                //rule_name = std::to_string(hash_(rule_group + rule_path));
+                rule_name = old_rule_name = findFileName(rule_path);
+                int idx = 2;
+                while(std::find(groups.begin(), groups.end(), rule_name) != groups.end())
+                    rule_name = old_rule_name + "_" + std::to_string(idx++);
                 names[rule_name] = rule_group;
                 urls[rule_name] = "*" + rule_path;
+                rule_type[rule_name] = x.rule_type;
+                ruleset_interval[rule_name] = x.update_interval;
                 switch(x.rule_type)
                 {
                 case RULESET_CLASH_IPCIDR:
                     has_ipcidr[rule_name] = true;
                     if(!script)
-                        rules.emplace_back("RULE-SET," + rule_group + "_" + rule_name + "_ipcidr," + rule_group);
+                        rules.emplace_back("RULE-SET," + rule_name + "_ipcidr," + rule_group);
                     break;
                 case RULESET_CLASH_DOMAIN:
                     has_domain[rule_name] = true;
                     if(!script)
-                        rules.emplace_back("RULE-SET," + rule_group + "_" + rule_name + "_domain," + rule_group);
+                        rules.emplace_back("RULE-SET," + rule_name + "_domain," + rule_group);
                     break;
                 case RULESET_CLASH_CLASSICAL:
                     if(!script)
-                        rules.emplace_back("RULE-SET," + rule_group + "_" + rule_name + "_classical," + rule_group);
+                        rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                     break;
                 }
-                groups.emplace_back(rule_name);
+                groups.emplace_back(std::move(rule_name));
                 continue;
             }
             if(remote_path_prefix.size())
             {
                 if(fileExist(rule_path, true) || isLink(rule_path))
                 {
-                    rule_name = std::to_string(hash_(rule_group + rule_path));
+                    //rule_name = std::to_string(hash_(rule_group + rule_path));
+                    rule_name = old_rule_name = findFileName(rule_path);
+                    int idx = 2;
+                    while(std::find(groups.begin(), groups.end(), rule_name) != groups.end())
+                        rule_name = old_rule_name + "_" + std::to_string(idx++);
                     names[rule_name] = rule_group;
                     urls[rule_name] = rule_path_typed;
+                    rule_type[rule_name] = x.rule_type;
+                    ruleset_interval[rule_name] = x.update_interval;
                     if(clash_classical_ruleset)
                     {
-                        groups.emplace_back(rule_name);
                         if(!script)
-                            rules.emplace_back("RULE-SET," + rule_group + "_" + rule_name + "_classical," + rule_group);
+                            rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                        groups.emplace_back(std::move(rule_name));
                         continue;
                     }
                 }
@@ -325,10 +366,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<ruleset_content> &rules
             {
                 lineSize = strLine.size();
                 if(lineSize && strLine[lineSize - 1] == '\r') //remove line break
-                {
-                    strLine.erase(lineSize - 1);
-                    lineSize--;
-                }
+                    strLine.erase(--lineSize);
                 if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
                     continue;
 
@@ -347,80 +385,83 @@ int renderClashScript(YAML::Node &base_rule, std::vector<ruleset_content> &rules
                     else
                     {
                         strLine += "," + rule_group;
-                        if(std::count(strLine.begin(), strLine.end(), ',') > 2)
+                        if(count_least(strLine, ',', 3))
                             strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
-                        rules.emplace_back(strLine);
+                        rules.emplace_back(std::move(strLine));
                     }
                 }
-                else if(startsWith(strLine, "DOMAIN,") || startsWith(strLine, "DOMAIN-SUFFIX,"))
+                else if(!has_domain[rule_name] && (startsWith(strLine, "DOMAIN,") || startsWith(strLine, "DOMAIN-SUFFIX,")))
                     has_domain[rule_name] = true;
-                else if(startsWith(strLine, "IP-CIDR,") || startsWith(strLine, "IP-CIDR6,"))
+                else if(!has_ipcidr[rule_name] && (startsWith(strLine, "IP-CIDR,") || startsWith(strLine, "IP-CIDR6,")))
                     has_ipcidr[rule_name] = true;
             }
             if(has_domain[rule_name] && !script)
-                rules.emplace_back("RULE-SET," + rule_group + "_" + rule_name + "_domain," + rule_group);
+                rules.emplace_back("RULE-SET," + rule_name + "_domain," + rule_group);
             if(has_ipcidr[rule_name] && !script)
-                rules.emplace_back("RULE-SET," + rule_group + "_" + rule_name + "_ipcidr," + rule_group);
+                rules.emplace_back("RULE-SET," + rule_name + "_ipcidr," + rule_group);
             if(std::find(groups.begin(), groups.end(), rule_name) == groups.end())
-                groups.emplace_back(rule_name);
+                groups.emplace_back(std::move(rule_name));
         }
     }
     for(std::string &x : groups)
     {
-        std::string json_path = "rules." + std::to_string(index) + ".";
         std::string url = urls[x], keyword = keywords[x], name = names[x];
         bool group_has_domain = has_domain[x], group_has_ipcidr = has_ipcidr[x];
-        if(clash_classical_ruleset)
+        int interval = ruleset_interval[x];
+
+        if(group_has_domain)
         {
-            base_rule["rule-providers"][name + "_" + x + "_classical"]["type"] = "http";
-            base_rule["rule-providers"][name + "_" + x + "_classical"]["behavior"] = "classical";
+            std::string yaml_key = x;
+            if(rule_type[x] != RULESET_CLASH_DOMAIN)
+                yaml_key += "_domain";
+            base_rule["rule-providers"][yaml_key]["type"] = "http";
+            base_rule["rule-providers"][yaml_key]["behavior"] = "domain";
             if(url[0] == '*')
-                base_rule["rule-providers"][name + "_" + x + "_classical"]["url"] = url.substr(1);
+                base_rule["rule-providers"][yaml_key]["url"] = url.substr(1);
             else
-                base_rule["rule-providers"][name + "_" + x + "_classical"]["url"] = remote_path_prefix + "/getruleset?type=6&url=" + urlsafe_base64_encode(url);
-            base_rule["rule-providers"][name + "_" + x + "_classical"]["path"] = "./providers/rule-provider_" + x + "_classical.yaml";
+                base_rule["rule-providers"][yaml_key]["url"] = remote_path_prefix + "/getruleset?type=3&url=" + urlsafe_base64_encode(url);
+            base_rule["rule-providers"][yaml_key]["path"] = "./providers/rule-provider_" + x + "_domain.yaml";
+            if(interval)
+                base_rule["rule-providers"][yaml_key]["interval"] = interval;
         }
-        else
+        if(group_has_ipcidr)
         {
-            if(group_has_domain)
-            {
-                base_rule["rule-providers"][name + "_" + x + "_domain"]["type"] = "http";
-                base_rule["rule-providers"][name + "_" + x + "_domain"]["behavior"] = "domain";
-                if(url[0] == '*')
-                    base_rule["rule-providers"][name + "_" + x + "_domain"]["url"] = url.substr(1);
-                else
-                    base_rule["rule-providers"][name + "_" + x + "_domain"]["url"] = remote_path_prefix + "/getruleset?type=3&url=" + urlsafe_base64_encode(url);
-                base_rule["rule-providers"][name + "_" + x + "_domain"]["path"] = "./providers/rule-provider_" + x + "_domain.yaml";
-            }
-            if(group_has_ipcidr)
-            {
-                base_rule["rule-providers"][name + "_" + x + "_ipcidr"]["type"] = "http";
-                base_rule["rule-providers"][name + "_" + x + "_ipcidr"]["behavior"] = "ipcidr";
-                if(url[0] == '*')
-                    base_rule["rule-providers"][name + "_" + x + "_ipcidr"]["url"] = url.substr(1);
-                else
-                    base_rule["rule-providers"][name + "_" + x + "_ipcidr"]["url"] = remote_path_prefix + "/getruleset?type=4&url=" + urlsafe_base64_encode(url);
-                base_rule["rule-providers"][name + "_" + x + "_ipcidr"]["path"] = "./providers/rule-provider_" + x + "_ipcidr.yaml";
-            }
-            if(!group_has_domain && !group_has_ipcidr)
-            {
-                base_rule["rule-providers"][name + "_" + x + "_classical"]["type"] = "http";
-                base_rule["rule-providers"][name + "_" + x + "_classical"]["behavior"] = "classical";
-                if(url[0] == '*')
-                    base_rule["rule-providers"][name + "_" + x + "_classical"]["url"] = url.substr(1);
-                else
-                    base_rule["rule-providers"][name + "_" + x + "_classical"]["url"] = remote_path_prefix + "/getruleset?type=6&url=" + urlsafe_base64_encode(url);
-                base_rule["rule-providers"][name + "_" + x + "_classical"]["path"] = "./providers/rule-provider_" + x + "_classical.yaml";
-            }
+            std::string yaml_key = x;
+            if(rule_type[x] != RULESET_CLASH_IPCIDR)
+                yaml_key += "_ipcidr";
+            base_rule["rule-providers"][yaml_key]["type"] = "http";
+            base_rule["rule-providers"][yaml_key]["behavior"] = "ipcidr";
+            if(url[0] == '*')
+                base_rule["rule-providers"][yaml_key]["url"] = url.substr(1);
+            else
+                base_rule["rule-providers"][yaml_key]["url"] = remote_path_prefix + "/getruleset?type=4&url=" + urlsafe_base64_encode(url);
+            base_rule["rule-providers"][yaml_key]["path"] = "./providers/rule-provider_" + x + "_ipcidr.yaml";
+            if(interval)
+                base_rule["rule-providers"][yaml_key]["interval"] = interval;
+        }
+        if(!group_has_domain && !group_has_ipcidr)
+        {
+            std::string yaml_key = x;
+            base_rule["rule-providers"][yaml_key]["type"] = "http";
+            base_rule["rule-providers"][yaml_key]["behavior"] = "classical";
+            if(url[0] == '*')
+                base_rule["rule-providers"][yaml_key]["url"] = url.substr(1);
+            else
+                base_rule["rule-providers"][yaml_key]["url"] = remote_path_prefix + "/getruleset?type=6&url=" + urlsafe_base64_encode(url);
+            base_rule["rule-providers"][yaml_key]["path"] = "./providers/rule-provider_" + x + "_classical.yaml";
+            if(interval)
+                base_rule["rule-providers"][yaml_key]["interval"] = interval;
         }
         if(script)
         {
+            std::string json_path = "rules." + std::to_string(index) + ".";
             parse_json_pointer(data, json_path + "has_domain", group_has_domain ? "true" : "false");
             parse_json_pointer(data, json_path + "has_ipcidr", group_has_ipcidr ? "true" : "false");
-            parse_json_pointer(data, json_path + "name", name + "_" + x);
+            parse_json_pointer(data, json_path + "name", x);
             parse_json_pointer(data, json_path + "group", name);
             parse_json_pointer(data, json_path + "set", "true");
             parse_json_pointer(data, json_path + "keyword", keyword);
+            parse_json_pointer(data, json_path + "original", (rule_type[x] == RULESET_CLASH_DOMAIN || rule_type[x] == RULESET_CLASH_IPCIDR) ? "true" : "false");
         }
         index++;
     }
@@ -432,8 +473,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<ruleset_content> &rules
         parse_json_pointer(data, "match_group", match_group);
 
         inja::Environment env;
-        env.include_template("group_template", env.parse(clash_script_group_template));
         env.include_template("keyword_template", env.parse(clash_script_keyword_template));
+        env.include_template("group_template", env.parse(clash_script_group_template));
         inja::Template tmpl = env.parse(clash_script_template);
 
         try
