@@ -1,9 +1,7 @@
-// Copyright (c) 2019 Pantor. All rights reserved.
+// Copyright (c) 2020 Pantor. All rights reserved.
 
 #ifndef INCLUDE_INJA_INJA_HPP_
 #define INCLUDE_INJA_INJA_HPP_
-
-#include <iostream>
 
 #include <nlohmann/json.hpp>
 
@@ -14,6 +12,7 @@
 #define INCLUDE_INJA_ENVIRONMENT_HPP_
 
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1461,7 +1460,9 @@ struct LexerConfig {
   std::string statement_close_force_rstrip {"-%}"};
   std::string line_statement {"##"};
   std::string expression_open {"{{"};
+  std::string expression_open_force_lstrip {"{{-"};
   std::string expression_close {"}}"};
+  std::string expression_close_force_rstrip {"-}}"};
   std::string comment_open {"{#"};
   std::string comment_close {"#}"};
   std::string open_chars {"#{"};
@@ -1485,6 +1486,9 @@ struct LexerConfig {
     }
     if (open_chars.find(expression_open[0]) == std::string::npos) {
       open_chars += expression_open[0];
+    }
+    if (open_chars.find(expression_open_force_lstrip[0]) == std::string::npos) {
+      open_chars += expression_open_force_lstrip[0];
     }
     if (open_chars.find(comment_open[0]) == std::string::npos) {
       open_chars += comment_open[0];
@@ -1530,6 +1534,7 @@ using json = nlohmann::json;
 
 using Arguments = std::vector<const json *>;
 using CallbackFunction = std::function<json(Arguments &args)>;
+using VoidCallbackFunction = std::function<void(Arguments &args)>;
 
 /*!
  * \brief Class for builtin functions and user-defined callbacks.
@@ -1553,6 +1558,7 @@ public:
     Division,
     Power,
     Modulo,
+    AtId,
     At,
     Default,
     DivisibleBy,
@@ -1585,13 +1591,14 @@ public:
     None,
   };
 
-  const int VARIADIC {-1};
-
   struct FunctionData {
-    Operation operation;
-
-    CallbackFunction callback;
+    explicit FunctionData(const Operation &op, const CallbackFunction &cb = CallbackFunction{}) : operation(op), callback(cb) {}
+    const Operation operation;
+    const CallbackFunction callback;
   };
+
+private:
+  const int VARIADIC {-1};
 
   std::map<std::pair<std::string, int>, FunctionData> function_storage = {
     {std::make_pair("at", 2), FunctionData { Operation::At }},
@@ -1644,7 +1651,7 @@ public:
       }
     }
 
-    return { Operation::None };
+    return FunctionData { Operation::None };
   }
 };
 
@@ -1684,39 +1691,35 @@ struct SourceLocation {
 };
 
 struct InjaError : public std::runtime_error {
-  std::string type;
-  std::string message;
+  const std::string type;
+  const std::string message;
 
-  bool has_location {false};
-  SourceLocation location;
+  const SourceLocation location;
 
-  InjaError(const std::string &type, const std::string &message)
-      : std::runtime_error("[inja.exception." + type + "] " + message), type(type), message(message) {}
+  explicit InjaError(const std::string &type, const std::string &message)
+      : std::runtime_error("[inja.exception." + type + "] " + message), type(type), message(message), location({0, 0}) {}
 
-  InjaError(const std::string &type, const std::string &message, SourceLocation location)
+  explicit InjaError(const std::string &type, const std::string &message, SourceLocation location)
       : std::runtime_error("[inja.exception." + type + "] (at " + std::to_string(location.line) + ":" +
                            std::to_string(location.column) + ") " + message),
-        type(type), message(message), has_location(true), location(location) {}
+        type(type), message(message), location(location) {}
 };
 
 struct ParserError : public InjaError {
-  ParserError(const std::string &message) : InjaError("parser_error", message) {}
-  ParserError(const std::string &message, SourceLocation location) : InjaError("parser_error", message, location) {}
+  explicit ParserError(const std::string &message, SourceLocation location) : InjaError("parser_error", message, location) {}
 };
 
 struct RenderError : public InjaError {
-  RenderError(const std::string &message) : InjaError("render_error", message) {}
-  RenderError(const std::string &message, SourceLocation location) : InjaError("render_error", message, location) {}
+  explicit RenderError(const std::string &message, SourceLocation location) : InjaError("render_error", message, location) {}
 };
 
 struct FileError : public InjaError {
-  FileError(const std::string &message) : InjaError("file_error", message) {}
-  FileError(const std::string &message, SourceLocation location) : InjaError("file_error", message, location) {}
+  explicit FileError(const std::string &message) : InjaError("file_error", message) {}
+  explicit FileError(const std::string &message, SourceLocation location) : InjaError("file_error", message, location) {}
 };
 
 struct JsonError : public InjaError {
-  JsonError(const std::string &message) : InjaError("json_error", message) {}
-  JsonError(const std::string &message, SourceLocation location) : InjaError("json_error", message, location) {}
+  explicit JsonError(const std::string &message, SourceLocation location) : InjaError("json_error", message, location) {}
 };
 
 } // namespace inja
@@ -1773,6 +1776,7 @@ struct Token {
     Percent,            // %
     Power,              // ^
     Comma,              // ,
+    Dot,                // .
     Colon,              // :
     LeftParen,          // (
     RightParen,         // )
@@ -1875,7 +1879,7 @@ inline SourceLocation get_source_location(nonstd::string_view content, size_t po
   size_t search_start = 0;
   while (search_start <= sliced.size()) {
     search_start = sliced.find("\n", search_start) + 1;
-    if (search_start <= 0) {
+    if (search_start == 0) {
       break;
     }
     count_lines += 1;
@@ -1898,6 +1902,7 @@ class Lexer {
   enum class State {
     Text,
     ExpressionStart,
+    ExpressionStartForceLstrip,
     ExpressionBody,
     LineStart,
     LineBody,
@@ -1921,8 +1926,6 @@ class Lexer {
   nonstd::string_view m_in;
   size_t tok_start;
   size_t pos;
-  bool temp_trim_flag = false;
-
 
   Token scan_body(nonstd::string_view close, Token::Kind closeKind, nonstd::string_view close_trim = nonstd::string_view(), bool trim = false) {
   again:
@@ -1945,22 +1948,13 @@ class Lexer {
       return tok;
     }
 
-    if (ch == '-') {
-      if (inja::string_view::starts_with(m_in.substr(tok_start + 1), close)) {
-        tok_start += 1;
-        temp_trim_flag = true;
-      } else
-        return make_token(Token::Kind::Unknown);
-    }
-
     if (inja::string_view::starts_with(m_in.substr(tok_start), close)) {
       state = State::Text;
       pos = tok_start + close.size();
       Token tok = make_token(closeKind);
-      if (trim || temp_trim_flag) {
+      if (trim) {
         skip_whitespaces_and_first_newline();
       }
-      temp_trim_flag = false;
       return tok;
     }
 
@@ -1997,6 +1991,8 @@ class Lexer {
       return make_token(Token::Kind::Power);
     case '%':
       return make_token(Token::Kind::Percent);
+    case '.':
+      return make_token(Token::Kind::Dot);
     case ',':
       return make_token(Token::Kind::Comma);
     case ':':
@@ -2155,7 +2151,7 @@ class Lexer {
   }
 
 public:
-  explicit Lexer(const LexerConfig &config) : config(config) {}
+  explicit Lexer(const LexerConfig &config) : config(config), state(State::Text), minus_state(MinusState::Number) {}
 
   SourceLocation current_position() const {
     return get_source_location(m_in, tok_start);
@@ -2167,6 +2163,11 @@ public:
     pos = 0;
     state = State::Text;
     minus_state = MinusState::Number;
+
+    // Consume byte order mark (BOM) for UTF-8
+    if (inja::string_view::starts_with(m_in, "\xEF\xBB\xBF")) {
+      m_in = m_in.substr(3);
+    }
   }
 
   Token scan() {
@@ -2193,7 +2194,12 @@ public:
       nonstd::string_view open_str = m_in.substr(pos);
       bool must_lstrip = false;
       if (inja::string_view::starts_with(open_str, config.expression_open)) {
-        state = State::ExpressionStart;
+        if (inja::string_view::starts_with(open_str, config.expression_open_force_lstrip)) {
+          state = State::ExpressionStartForceLstrip;
+          must_lstrip = true;
+        } else {
+          state = State::ExpressionStart;
+        }
       } else if (inja::string_view::starts_with(open_str, config.statement_open)) {
         if (inja::string_view::starts_with(open_str, config.statement_open_no_lstrip)) {
           state = State::StatementStartNoLstrip;
@@ -2207,8 +2213,7 @@ public:
       } else if (inja::string_view::starts_with(open_str, config.comment_open)) {
         state = State::CommentStart;
         must_lstrip = config.lstrip_blocks;
-      } else if ((pos == 0 || m_in[pos - 1] == '\n') &&
-                 inja::string_view::starts_with(open_str, config.line_statement)) {
+      } else if ((pos == 0 || m_in[pos - 1] == '\n') && inja::string_view::starts_with(open_str, config.line_statement)) {
         state = State::LineStart;
       } else {
         pos += 1; // wasn't actually an opening sequence
@@ -2228,11 +2233,11 @@ public:
     case State::ExpressionStart: {
       state = State::ExpressionBody;
       pos += config.expression_open.size();
-      // whitespace control
-      if (m_in[pos] == '-') {
-        pos += 1;
-        temp_trim_flag = true;
-      }
+      return make_token(Token::Kind::ExpressionOpen);
+    }
+    case State::ExpressionStartForceLstrip: {
+      state = State::ExpressionBody;
+      pos += config.expression_open_force_lstrip.size();
       return make_token(Token::Kind::ExpressionOpen);
     }
     case State::LineStart: {
@@ -2261,7 +2266,7 @@ public:
       return make_token(Token::Kind::CommentOpen);
     }
     case State::ExpressionBody:
-      return scan_body(config.expression_close, Token::Kind::ExpressionClose);
+      return scan_body(config.expression_close, Token::Kind::ExpressionClose, config.expression_close_force_rstrip);
     case State::LineBody:
       return scan_body("\n", Token::Kind::LineStatementClose);
     case State::StatementBody:
@@ -2327,6 +2332,7 @@ class ForArrayStatementNode;
 class ForObjectStatementNode;
 class IfStatementNode;
 class IncludeStatementNode;
+class SetStatementNode;
 
 
 class NodeVisitor {
@@ -2344,6 +2350,7 @@ public:
   virtual void visit(const ForObjectStatementNode& node) = 0;
   virtual void visit(const IfStatementNode& node) = 0;
   virtual void visit(const IncludeStatementNode& node) = 0;
+  virtual void visit(const SetStatementNode& node) = 0;
 };
 
 /*!
@@ -2373,9 +2380,9 @@ public:
 
 class TextNode : public AstNode {
 public:
-  std::string content;
+  const size_t length;
 
-  explicit TextNode(nonstd::string_view content, size_t pos): AstNode(pos), content(content) { }
+  explicit TextNode(size_t pos, size_t length): AstNode(pos), length(length) { }
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -2393,7 +2400,7 @@ public:
 
 class LiteralNode : public ExpressionNode {
 public:
-  nlohmann::json value;
+  const nlohmann::json value;
 
   explicit LiteralNode(const nlohmann::json& value, size_t pos) : ExpressionNode(pos), value(value) { }
 
@@ -2404,18 +2411,21 @@ public:
 
 class JsonNode : public ExpressionNode {
 public:
-  std::string name;
-  std::string ptr {""};
+  const std::string name;
+  const json::json_pointer ptr;
 
-  explicit JsonNode(nonstd::string_view ptr_name, size_t pos) : ExpressionNode(pos), name(ptr_name) {
-    // Convert dot notation to json pointer notation
+  static std::string convert_dot_to_json_ptr(nonstd::string_view ptr_name) {
+    std::string result;
     do {
       nonstd::string_view part;
       std::tie(part, ptr_name) = string_view::split(ptr_name, '.');
-      ptr.push_back('/');
-      ptr.append(part.begin(), part.end());
+      result.push_back('/');
+      result.append(part.begin(), part.end());
     } while (!ptr_name.empty());
+    return result;
   }
+
+  explicit JsonNode(nonstd::string_view ptr_name, size_t pos) : ExpressionNode(pos), name(ptr_name), ptr(json::json_pointer(convert_dot_to_json_ptr(ptr_name))) { }
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -2437,10 +2447,10 @@ public:
   Op operation;
 
   std::string name;
-  size_t number_args;
+  int number_args; // Should also be negative -> -1 for unknown number
   CallbackFunction callback;
 
-  explicit FunctionNode(nonstd::string_view name, size_t pos) : ExpressionNode(pos), precedence(5), associativity(Associativity::Left), operation(Op::Callback), name(name), number_args(1) { }
+  explicit FunctionNode(nonstd::string_view name, size_t pos) : ExpressionNode(pos), precedence(8), associativity(Associativity::Left), operation(Op::Callback), name(name), number_args(1) { }
   explicit FunctionNode(Op operation, size_t pos) : ExpressionNode(pos), operation(operation), number_args(1) {
     switch (operation) {
       case Op::Not: {
@@ -2507,6 +2517,10 @@ public:
         precedence = 4;
         associativity = Associativity::Left;
       } break;
+      case Op::AtId: {
+        precedence = 8;
+        associativity = Associativity::Left;
+      } break;
       default: {
         precedence = 1;
         associativity = Associativity::Left;
@@ -2542,18 +2556,18 @@ class ForStatementNode : public StatementNode {
 public:
   ExpressionListNode condition;
   BlockNode body;
-  BlockNode *parent;
+  BlockNode *const parent;
 
-  ForStatementNode(size_t pos) : StatementNode(pos) { }
+  ForStatementNode(BlockNode *const parent, size_t pos) : StatementNode(pos), parent(parent) { }
 
   virtual void accept(NodeVisitor& v) const = 0;
 };
 
 class ForArrayStatementNode : public ForStatementNode {
 public:
-  nonstd::string_view value;
+  const std::string value;
 
-  explicit ForArrayStatementNode(nonstd::string_view value, size_t pos) : ForStatementNode(pos), value(value) { }
+  explicit ForArrayStatementNode(const std::string& value, BlockNode *const parent, size_t pos) : ForStatementNode(parent, pos), value(value) { }
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -2562,10 +2576,10 @@ public:
 
 class ForObjectStatementNode : public ForStatementNode {
 public:
-  nonstd::string_view key;
-  nonstd::string_view value;
+  const std::string key;
+  const std::string value;
 
-  explicit ForObjectStatementNode(nonstd::string_view key, nonstd::string_view value, size_t pos) : ForStatementNode(pos), key(key), value(value) { }
+  explicit ForObjectStatementNode(const std::string& key, const std::string& value, BlockNode *const parent, size_t pos) : ForStatementNode(parent, pos), key(key), value(value) { }
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -2577,13 +2591,13 @@ public:
   ExpressionListNode condition;
   BlockNode true_statement;
   BlockNode false_statement;
-  BlockNode *parent;
+  BlockNode *const parent;
 
-  bool is_nested;
+  const bool is_nested;
   bool has_false_statement {false};
 
-  explicit IfStatementNode(size_t pos) : StatementNode(pos), is_nested(false) { }
-  explicit IfStatementNode(bool is_nested, size_t pos) : StatementNode(pos), is_nested(is_nested) { }
+  explicit IfStatementNode(BlockNode *const parent, size_t pos) : StatementNode(pos), parent(parent), is_nested(false) { }
+  explicit IfStatementNode(bool is_nested, BlockNode *const parent, size_t pos) : StatementNode(pos), parent(parent), is_nested(is_nested) { }
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -2592,9 +2606,21 @@ public:
 
 class IncludeStatementNode : public StatementNode {
 public:
-  std::string file;
+  const std::string file;
 
   explicit IncludeStatementNode(const std::string& file, size_t pos) : StatementNode(pos), file(file) { }
+
+  void accept(NodeVisitor& v) const {
+    v.visit(*this);
+  };
+};
+
+class SetStatementNode : public StatementNode {
+public:
+  const std::string key;
+  ExpressionListNode expression;
+
+  explicit SetStatementNode(const std::string& key, size_t pos) : StatementNode(pos), key(key) { }
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -2676,6 +2702,8 @@ class StatisticsVisitor : public NodeVisitor {
   }
 
   void visit(const IncludeStatementNode&) { }
+
+  void visit(const SetStatementNode&) { }
 
 public:
   unsigned int variable_counter;
@@ -2840,14 +2868,14 @@ class Parser {
             add_json_literal(tmpl.content.c_str());
           }
 
+	      // Operator
+        } else if (tok.text == "and" || tok.text == "or" || tok.text == "in" || tok.text == "not") {
+          goto parse_operator;
+
         // Functions
         } else if (peek_tok.kind == Token::Kind::LeftParen) {
           operator_stack.emplace(std::make_shared<FunctionNode>(static_cast<std::string>(tok.text), tok.text.data() - tmpl.content.c_str()));
           function_stack.emplace(operator_stack.top().get(), current_paren_level);
-
-        // Operator
-        } else if (tok.text == "and" || tok.text == "or" || tok.text == "in" || tok.text == "not") {
-          goto parse_operator;
 
         // Variables
         } else {
@@ -2867,7 +2895,8 @@ class Parser {
       case Token::Kind::Times:
       case Token::Kind::Slash:
       case Token::Kind::Power:
-      case Token::Kind::Percent: {
+      case Token::Kind::Percent:
+      case Token::Kind::Dot: {
 
   parse_operator:
         FunctionStorage::Operation operation;
@@ -2921,6 +2950,9 @@ class Parser {
         case Token::Kind::Percent: {
           operation = FunctionStorage::Operation::Modulo;
         } break;
+        case Token::Kind::Dot: {
+          operation = FunctionStorage::Operation::AtId;
+        } break;
         default: {
           throw_parser_error("unknown operator in parser.");
         }
@@ -2965,12 +2997,12 @@ class Parser {
       } break;
       case Token::Kind::RightParen: {
         current_paren_level -= 1;
-        while (operator_stack.top()->operation != FunctionStorage::Operation::ParenLeft) {
+        while (!operator_stack.empty() && operator_stack.top()->operation != FunctionStorage::Operation::ParenLeft) {
           current_expression_list->rpn_output.emplace_back(operator_stack.top());
           operator_stack.pop();
         }
 
-        if (operator_stack.top()->operation == FunctionStorage::Operation::ParenLeft) {
+        if (!operator_stack.empty() && operator_stack.top()->operation == FunctionStorage::Operation::ParenLeft) {
           operator_stack.pop();
         }
 
@@ -2985,6 +3017,12 @@ class Parser {
             func->callback = function_data.callback;
           }
 
+          if (operator_stack.empty()) {
+            throw_parser_error("internal error at function " + func->name);
+          }
+
+          current_expression_list->rpn_output.emplace_back(operator_stack.top());
+          operator_stack.pop();
           function_stack.pop();
         }
       }
@@ -3011,9 +3049,8 @@ class Parser {
     if (tok.text == static_cast<decltype(tok.text)>("if")) {
       get_next_token();
 
-      auto if_statement_node = std::make_shared<IfStatementNode>(tok.text.data() - tmpl.content.c_str());
+      auto if_statement_node = std::make_shared<IfStatementNode>(current_block, tok.text.data() - tmpl.content.c_str());
       current_block->nodes.emplace_back(if_statement_node);
-      if_statement_node->parent = current_block;
       if_statement_stack.emplace(if_statement_node.get());
       current_block = &if_statement_node->true_statement;
       current_expression_list = &if_statement_node->condition;
@@ -3036,9 +3073,8 @@ class Parser {
       if (tok.kind == Token::Kind::Id && tok.text == static_cast<decltype(tok.text)>("if")) {
         get_next_token();
 
-        auto if_statement_node = std::make_shared<IfStatementNode>(true, tok.text.data() - tmpl.content.c_str());
+        auto if_statement_node = std::make_shared<IfStatementNode>(true, current_block, tok.text.data() - tmpl.content.c_str());
         current_block->nodes.emplace_back(if_statement_node);
-        if_statement_node->parent = current_block;
         if_statement_stack.emplace(if_statement_node.get());
         current_block = &if_statement_node->true_statement;
         current_expression_list = &if_statement_node->condition;
@@ -3087,15 +3123,14 @@ class Parser {
         value_token = tok;
         get_next_token();
 
-        for_statement_node = std::make_shared<ForObjectStatementNode>(key_token.text, value_token.text, tok.text.data() - tmpl.content.c_str());
+        for_statement_node = std::make_shared<ForObjectStatementNode>(static_cast<std::string>(key_token.text), static_cast<std::string>(value_token.text), current_block, tok.text.data() - tmpl.content.c_str());
 
       // Array type
       } else {
-        for_statement_node = std::make_shared<ForArrayStatementNode>(value_token.text, tok.text.data() - tmpl.content.c_str());
+        for_statement_node = std::make_shared<ForArrayStatementNode>(static_cast<std::string>(value_token.text), current_block, tok.text.data() - tmpl.content.c_str());
       }
 
       current_block->nodes.emplace_back(for_statement_node);
-      for_statement_node->parent = current_block;
       for_statement_stack.emplace(for_statement_node.get());
       current_block = &for_statement_node->body;
       current_expression_list = &for_statement_node->condition;
@@ -3159,6 +3194,29 @@ class Parser {
 
       get_next_token();
 
+    } else if (tok.text == static_cast<decltype(tok.text)>("set")) {
+      get_next_token();
+
+      if (tok.kind != Token::Kind::Id) {
+        throw_parser_error("expected variable name, got '" + tok.describe() + "'");
+      }
+
+      std::string key = static_cast<std::string>(tok.text);
+      get_next_token();
+
+      auto set_statement_node = std::make_shared<SetStatementNode>(key, tok.text.data() - tmpl.content.c_str());
+      current_block->nodes.emplace_back(set_statement_node);
+      current_expression_list = &set_statement_node->expression;
+
+      if (tok.text != static_cast<decltype(tok.text)>("=")) {
+        throw_parser_error("expected '=', got '" + tok.describe() + "'");
+      }
+      get_next_token();
+
+      if (!parse_expression(tmpl, closing)) {
+        return false;
+      }
+
     } else {
       return false;
     }
@@ -3181,7 +3239,7 @@ class Parser {
         }
       } return;
       case Token::Kind::Text: {
-        current_block->nodes.emplace_back(std::make_shared<TextNode>(tok.text, tok.text.data() - tmpl.content.c_str()));
+        current_block->nodes.emplace_back(std::make_shared<TextNode>(tok.text.data() - tmpl.content.c_str(), tok.text.size()));
       } break;
       case Token::Kind::StatementOpen: {
         get_next_token();
@@ -3306,32 +3364,30 @@ class Renderer : public NodeVisitor  {
   const json *json_input;
   std::ostream *output_stream;
 
-  json json_loop_data;
-  json* current_loop_data = &json_loop_data["loop"];
+  json json_additional_data;
+  json* current_loop_data = &json_additional_data["loop"];
 
   std::vector<std::shared_ptr<json>> json_tmp_stack;
   std::stack<const json*> json_eval_stack;
   std::stack<const JsonNode*> not_found_stack;
 
   bool truthy(const json* data) const {
-    if (data->empty()) {
-      return false;
+    if (data->is_boolean()) {
+      return data->get<bool>();
     } else if (data->is_number()) {
       return (*data != 0);
-    } else if (data->is_string()) {
-      return !data->empty();
+    } else if (data->is_null()) {
+      return false;
     }
-
-    try {
-      return data->get<bool>();
-    } catch (json::type_error &e) {
-      throw JsonError(e.what());
-    }
+    return !data->empty();
   }
 
-  void print_json(const json* value) {
+  void print_json(const std::shared_ptr<json> value) {
     if (value->is_string()) {
-      *output_stream << value->get_ref<const std::string &>();
+      *output_stream << value->get_ref<const json::string_t&>();
+    } else if (value->is_number_integer()) {
+      *output_stream << value->get<const json::number_integer_t>();
+    } else if (value->is_null()) {
     } else {
       *output_stream << value->dump();
     }
@@ -3344,9 +3400,7 @@ class Renderer : public NodeVisitor  {
 
     if (json_eval_stack.empty()) {
       throw_renderer_error("empty expression", expression_list);
-    }
-
-    if (json_eval_stack.size() != 1) {
+    } else if (json_eval_stack.size() != 1) {
       throw_renderer_error("malformed expression", expression_list);
     }
 
@@ -3420,7 +3474,7 @@ class Renderer : public NodeVisitor  {
   }
 
   void visit(const TextNode& node) {
-    *output_stream << node.content;
+    output_stream->write(current_template->content.c_str() + node.pos, node.length);
   }
 
   void visit(const ExpressionNode&) { }
@@ -3430,17 +3484,13 @@ class Renderer : public NodeVisitor  {
   }
 
   void visit(const JsonNode& node) {
-    auto ptr = json::json_pointer(node.ptr);
-
-    try {
-      // First try to evaluate as a loop variable
-      if (json_loop_data.contains(ptr)) {
-        json_eval_stack.push(&json_loop_data.at(ptr));
-      } else {
-        json_eval_stack.push(&json_input->at(ptr));
-      }
-
-    } catch (std::exception &) {
+    if (json_additional_data.contains(node.ptr)) {
+      json_eval_stack.push(&(json_additional_data[node.ptr]));
+    
+    } else if (json_input->contains(node.ptr)) {
+      json_eval_stack.push(&(*json_input)[node.ptr]);
+    
+    } else {
       // Try to evaluate as a no-argument callback
       auto function_data = function_storage.find_function(node.name, 0);
       if (function_data.operation == FunctionStorage::Operation::Callback) {
@@ -3523,7 +3573,7 @@ class Renderer : public NodeVisitor  {
     case Op::Add: {
       auto args = get_arguments<2>(node);
       if (args[0]->is_string() && args[1]->is_string()) {
-        result_ptr = std::make_shared<json>(args[0]->get<std::string>() + args[1]->get<std::string>());
+        result_ptr = std::make_shared<json>(args[0]->get_ref<const std::string&>() + args[1]->get_ref<const std::string&>());
         json_tmp_stack.push_back(result_ptr);
       } else if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
         result_ptr = std::make_shared<json>(args[0]->get<int>() + args[1]->get<int>());
@@ -3572,7 +3622,7 @@ class Renderer : public NodeVisitor  {
         result_ptr = std::make_shared<json>(std::move(result));
         json_tmp_stack.push_back(result_ptr);
       } else {
-        double result = std::pow(args[0]->get<int>(), args[1]->get<int>());
+        double result = std::pow(args[0]->get<double>(), args[1]->get<int>());
         result_ptr = std::make_shared<json>(std::move(result));
         json_tmp_stack.push_back(result_ptr);
       }
@@ -3583,6 +3633,16 @@ class Renderer : public NodeVisitor  {
       result_ptr = std::make_shared<json>(args[0]->get<int>() % args[1]->get<int>());
       json_tmp_stack.push_back(result_ptr);
       json_eval_stack.push(result_ptr.get());
+    } break;
+    case Op::AtId: {
+      json_eval_stack.pop(); // Pop id nullptr
+      auto container = get_arguments<1, false>(node)[0];
+      if (not_found_stack.empty()) {
+        throw_renderer_error("could not find element with given name", node);
+      }
+      auto id_node = not_found_stack.top();
+      not_found_stack.pop();
+      json_eval_stack.push(&container->at(id_node->name));
     } break;
     case Op::At: {
       auto args = get_arguments<2>(node);
@@ -3607,7 +3667,7 @@ class Renderer : public NodeVisitor  {
     } break;
     case Op::Exists: {
       auto &&name = get_arguments<1>(node)[0]->get_ref<const std::string &>();
-      result_ptr = std::make_shared<json>(json_input->contains(json::json_pointer(JsonNode(name, 0).ptr)));
+      result_ptr = std::make_shared<json>(json_input->contains(json::json_pointer(JsonNode::convert_dot_to_json_ptr(name))));
       json_tmp_stack.push_back(result_ptr);
       json_eval_stack.push(result_ptr.get());
     } break;
@@ -3745,7 +3805,7 @@ class Renderer : public NodeVisitor  {
   }
 
   void visit(const ExpressionListNode& node) {
-    print_json(eval_expression_list(node).get());
+    print_json(eval_expression_list(node));
   }
 
   void visit(const StatementNode&) { }
@@ -3763,24 +3823,31 @@ class Renderer : public NodeVisitor  {
       (*current_loop_data)["parent"] = std::move(tmp);
     }
 
+    size_t index = 0;
+    (*current_loop_data)["is_first"] = true;
+    (*current_loop_data)["is_last"] = (result->size() <= 1);
     for (auto it = result->begin(); it != result->end(); ++it) {
-      json_loop_data[static_cast<std::string>(node.value)] = *it;
+      json_additional_data[static_cast<std::string>(node.value)] = *it;
 
-      size_t index = std::distance(result->begin(), it);
       (*current_loop_data)["index"] = index;
       (*current_loop_data)["index1"] = index + 1;
-      (*current_loop_data)["is_first"] = (index == 0);
-      (*current_loop_data)["is_last"] = (index == result->size() - 1);
+      if (index == 1) {
+        (*current_loop_data)["is_first"] = false;
+      }
+      if (index == result->size() - 1) {
+        (*current_loop_data)["is_last"] = true;
+      }
 
       node.body.accept(*this);
+      ++index;
     }
 
-    json_loop_data[static_cast<std::string>(node.value)].clear();
+    json_additional_data[static_cast<std::string>(node.value)].clear();
     if (!(*current_loop_data)["parent"].empty()) {
       auto tmp = (*current_loop_data)["parent"];
       *current_loop_data = std::move(tmp);
     } else {
-      current_loop_data = &json_loop_data["loop"];
+      current_loop_data = &json_additional_data["loop"];
     }
   }
 
@@ -3794,25 +3861,32 @@ class Renderer : public NodeVisitor  {
       (*current_loop_data)["parent"] = std::move(*current_loop_data);
     }
 
+    size_t index = 0;
+    (*current_loop_data)["is_first"] = true;
+    (*current_loop_data)["is_last"] = (result->size() <= 1);
     for (auto it = result->begin(); it != result->end(); ++it) {
-      json_loop_data[static_cast<std::string>(node.key)] = it.key();
-      json_loop_data[static_cast<std::string>(node.value)] = it.value();
+      json_additional_data[static_cast<std::string>(node.key)] = it.key();
+      json_additional_data[static_cast<std::string>(node.value)] = it.value();
 
-      size_t index = std::distance(result->begin(), it);
       (*current_loop_data)["index"] = index;
       (*current_loop_data)["index1"] = index + 1;
-      (*current_loop_data)["is_first"] = (index == 0);
-      (*current_loop_data)["is_last"] = (index == result->size() - 1);
+      if (index == 1) {
+        (*current_loop_data)["is_first"] = false;
+      }
+      if (index == result->size() - 1) {
+        (*current_loop_data)["is_last"] = true;
+      }
 
       node.body.accept(*this);
+      ++index;
     }
 
-    json_loop_data[static_cast<std::string>(node.key)].clear();
-    json_loop_data[static_cast<std::string>(node.value)].clear();
+    json_additional_data[static_cast<std::string>(node.key)].clear();
+    json_additional_data[static_cast<std::string>(node.value)].clear();
     if (!(*current_loop_data)["parent"].empty()) {
       *current_loop_data = std::move((*current_loop_data)["parent"]);
     } else {
-      current_loop_data = &json_loop_data["loop"];
+      current_loop_data = &json_additional_data["loop"];
     }
   }
 
@@ -3830,10 +3904,14 @@ class Renderer : public NodeVisitor  {
     auto included_template_it = template_storage.find(node.file);
 
     if (included_template_it != template_storage.end()) {
-      sub_renderer.render_to(*output_stream, included_template_it->second, *json_input, &json_loop_data);
+      sub_renderer.render_to(*output_stream, included_template_it->second, *json_input, &json_additional_data);
     } else if (config.throw_at_missing_includes) {
       throw_renderer_error("include '" + node.file + "' not found", node);
     }
+  }
+
+  void visit(const SetStatementNode& node) {
+    json_additional_data[node.key] = *eval_expression_list(node.expression);
   }
 
 public:
@@ -3845,7 +3923,8 @@ public:
     current_template = &tmpl;
     json_input = &data;
     if (loop_data) {
-      json_loop_data = *loop_data;
+      json_additional_data = *loop_data;
+      current_loop_data = &json_additional_data["loop"];
     }
 
     current_template->root.accept(*this);
@@ -3910,7 +3989,9 @@ public:
   /// Sets the opener and closer for template expressions
   void set_expression(const std::string &open, const std::string &close) {
     lexer_config.expression_open = open;
+    lexer_config.expression_open_force_lstrip = open + "-";
     lexer_config.expression_close = close;
+    lexer_config.expression_close_force_rstrip = "-" + close;
     lexer_config.update_open_chars();
   }
 
@@ -4019,7 +4100,14 @@ public:
   @brief Adds a variadic callback
   */
   void add_callback(const std::string &name, const CallbackFunction &callback) {
-    function_storage.add_callback(name, -1, callback);
+    add_callback(name, -1, callback);
+  }
+
+  /*!
+  @brief Adds a variadic void callback
+  */
+  void add_void_callback(const std::string &name, const VoidCallbackFunction &callback) {
+    add_void_callback(name, -1, callback);
   }
 
   /*!
@@ -4027,6 +4115,13 @@ public:
   */
   void add_callback(const std::string &name, int num_args, const CallbackFunction &callback) {
     function_storage.add_callback(name, num_args, callback);
+  }
+
+  /*!
+  @brief Adds a void callback with given number or arguments
+  */
+  void add_void_callback(const std::string &name, int num_args, const VoidCallbackFunction &callback) {
+    function_storage.add_callback(name, num_args, [callback](Arguments& args) { callback(args); return json(); });
   }
 
   /** Includes a template with a given name into the environment.

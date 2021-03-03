@@ -32,7 +32,12 @@ void explodeVmess(std::string vmess, const std::string &custom_port, nodeInfo &n
     std::string version, ps, add, port, type, id, aid, net, path, host, tls;
     Document jsondata;
     std::vector<std::string> vArray;
-    if(regMatch(vmess, "vmess://(.*?)\\?(.*)")) //shadowrocket style link
+    if(regMatch(vmess, "vmess://(.*?)@(.*)"))
+    {
+        explodeStdVMess(vmess, custom_port, node);
+        return;
+    }
+    else if(regMatch(vmess, "vmess://(.*?)\\?(.*)")) //shadowrocket style link
     {
         explodeShadowrocket(vmess, custom_port, node);
         return;
@@ -175,6 +180,7 @@ void explodeVmessConf(std::string content, const std::string &custom_port, bool 
                 node.port = to_int(port, 1);
                 node.proxyStr = vmessConstruct(node.group, node.remarks, add, port, type, id, aid, net, cipher, path, host, edge, tls, udp, tfo, scv);
                 nodes.emplace_back(std::move(node));
+                node = nodeInfo();
             }
             return;
         }
@@ -250,6 +256,7 @@ void explodeVmessConf(std::string content, const std::string &custom_port, bool 
         node.server = add;
         node.port = to_int(port, 1);
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
     }
     return;
 }
@@ -381,6 +388,7 @@ void explodeSSD(std::string link, bool libev, const std::string &custom_port, st
         node.proxyStr = ssConstruct(group, remarks, server, port, password, method, plugin, pluginopts, libev);
         node.id = index;
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
     return;
@@ -424,6 +432,7 @@ void explodeSSAndroid(std::string ss, bool libev, const std::string &custom_port
         node.port = to_int(port, 1);
         node.proxyStr = ssConstruct(group, ps, server, port, password, method, plugin, pluginopts, libev);
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
 }
@@ -466,6 +475,7 @@ void explodeSSConf(std::string content, const std::string &custom_port, bool lib
         node.port = to_int(port, 1);
         node.proxyStr = ssConstruct(group, ps, server, port, password, method, plugin, pluginopts, libev);
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
     return;
@@ -558,30 +568,31 @@ void explodeSSRConf(std::string content, const std::string &custom_port, bool ss
             node.proxyStr = ssrConstruct(node.group, node.remarks, base64_encode(node.remarks), server, port, protocol, method, obfs, password, obfsparam, protoparam, ssr_libev);
         }
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         return;
     }
 
     for(unsigned int i = 0; i < json["configs"].Size(); i++)
     {
-        json["configs"][i]["group"] >> group;
+        group = GetMember(json["configs"][i], "group");
         if(group.empty())
             group = SSR_DEFAULT_GROUP;
-        json["configs"][i]["remarks"] >> remarks;
-        json["configs"][i]["server"] >> server;
+        remarks = GetMember(json["configs"][i], "remarks");
+        server = GetMember(json["configs"][i], "server");
         port = custom_port.size() ? custom_port : GetMember(json["configs"][i], "server_port");
         if(port == "0")
             continue;
         if(remarks.empty())
             remarks = server + ":" + port;
 
-        json["configs"][i]["remarks_base64"] >> remarks_base64;
-        json["configs"][i]["password"] >> password;
-        json["configs"][i]["method"] >> method;
+        remarks_base64 = GetMember(json["configs"][i], "remarks_base64"); // electron-ssr does not contain this field
+        password = GetMember(json["configs"][i], "password");
+        method = GetMember(json["configs"][i], "method");
 
-        json["configs"][i]["protocol"] >> protocol;
-        json["configs"][i]["protocolparam"] >> protoparam;
-        json["configs"][i]["obfs"] >> obfs;
-        json["configs"][i]["obfsparam"] >> obfsparam;
+        protocol = GetMember(json["configs"][i], "protocol");
+        protoparam = GetMember(json["configs"][i], "protocolparam");
+        obfs = GetMember(json["configs"][i], "obfs");
+        obfsparam = GetMember(json["configs"][i], "obfsparam");
 
         node.linkType = SPEEDTEST_MESSAGE_FOUNDSSR;
         node.group = group;
@@ -591,6 +602,7 @@ void explodeSSRConf(std::string content, const std::string &custom_port, bool ss
         node.port = to_int(port, 1);
         node.proxyStr = ssrConstruct(group, remarks, remarks_base64, server, port, protocol, method, obfs, password, obfsparam, protoparam, ssr_libev);
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
     return;
@@ -640,7 +652,7 @@ void explodeSocks(std::string link, const std::string &custom_port, nodeInfo &no
     node.proxyStr = socksConstruct(group, remarks, server, port, username, password);
 }
 
-void explodeHTTP(const std::string link, const std::string &custom_port, nodeInfo &node)
+void explodeHTTP(const std::string &link, const std::string &custom_port, nodeInfo &node)
 {
     std::string group, remarks, server, port, username, password;
     server = getUrlArg(link, "server");
@@ -712,7 +724,7 @@ void explodeHTTPSub(std::string link, const std::string &custom_port, nodeInfo &
 
 void explodeTrojan(std::string trojan, const std::string &custom_port, nodeInfo &node)
 {
-    std::string server, port, psk, addition, remark, host;
+    std::string server, port, psk, addition, group, remark, host;
     tribool tfo, scv;
     trojan.erase(0, 9);
     string_size pos = trojan.rfind("#");
@@ -739,18 +751,21 @@ void explodeTrojan(std::string trojan, const std::string &custom_port, nodeInfo 
     host = getUrlArg(addition, "peer");
     tfo = getUrlArg(addition, "tfo");
     scv = getUrlArg(addition, "allowInsecure");
+    group = UrlDecode(getUrlArg(addition, "group"));
 
     if(remark.empty())
         remark = server + ":" + port;
     if(host.empty() && !isIPv4(server) && !isIPv6(server))
         host = server;
+    if(group.empty())
+        group = TROJAN_DEFAULT_GROUP;
 
     node.linkType = SPEEDTEST_MESSAGE_FOUNDTROJAN;
-    node.group = TROJAN_DEFAULT_GROUP;
+    node.group = group;
     node.remarks = remark;
     node.server = server;
     node.port = to_int(port, 1);
-    node.proxyStr = trojanConstruct(node.group, remark, server, port, psk, host, true, tribool(), tfo, scv);
+    node.proxyStr = trojanConstruct(group, remark, server, port, psk, host, true, tribool(), tfo, scv);
 }
 
 void explodeQuan(const std::string &quan, const std::string &custom_port, nodeInfo &node)
@@ -991,26 +1006,27 @@ void explodeClash(Node yamlnode, const std::string &custom_port, std::vector<nod
             {
                 switch(hash_(safe_as<std::string>(singleproxy["plugin"])))
                 {
-                    case "obfs"_hash:
-                        plugin = "simple-obfs";
-                        if(singleproxy["plugin-opts"].IsDefined())
-                        {
-                            singleproxy["plugin-opts"]["mode"] >>= pluginopts_mode;
-                            singleproxy["plugin-opts"]["host"] >>= pluginopts_host;
-                        }
-                        break;
-                    case "v2ray-plugin"_hash:
-                        plugin = "v2ray-plugin";
-                        if(singleproxy["plugin-opts"].IsDefined())
-                        {
-                            singleproxy["plugin-opts"]["mode"] >>= pluginopts_mode;
-                            singleproxy["plugin-opts"]["host"] >>= pluginopts_host;
-                            tls = safe_as<bool>(singleproxy["plugin-opts"]["tls"]) ? "tls;" : "";
-                            singleproxy["plugin-opts"]["path"] >>= path;
-                            pluginopts_mux = safe_as<bool>(singleproxy["plugin-opts"]["mux"]) ? "mux=4;" : "";
-                        }
-                        break;
-                    default: break;
+                case "obfs"_hash:
+                    plugin = "simple-obfs";
+                    if(singleproxy["plugin-opts"].IsDefined())
+                    {
+                        singleproxy["plugin-opts"]["mode"] >>= pluginopts_mode;
+                        singleproxy["plugin-opts"]["host"] >>= pluginopts_host;
+                    }
+                    break;
+                case "v2ray-plugin"_hash:
+                    plugin = "v2ray-plugin";
+                    if(singleproxy["plugin-opts"].IsDefined())
+                    {
+                        singleproxy["plugin-opts"]["mode"] >>= pluginopts_mode;
+                        singleproxy["plugin-opts"]["host"] >>= pluginopts_host;
+                        tls = safe_as<bool>(singleproxy["plugin-opts"]["tls"]) ? "tls;" : "";
+                        singleproxy["plugin-opts"]["path"] >>= path;
+                        pluginopts_mux = safe_as<bool>(singleproxy["plugin-opts"]["mux"]) ? "mux=4;" : "";
+                    }
+                    break;
+                default:
+                    break;
                 }
             }
             else if(singleproxy["obfs"].IsDefined())
@@ -1052,7 +1068,7 @@ void explodeClash(Node yamlnode, const std::string &custom_port, std::vector<nod
             node.linkType = SPEEDTEST_MESSAGE_FOUNDSS;
             node.proxyStr = ssConstruct(group, ps, server, port, password, cipher, plugin, pluginopts, ss_libev, udp, tfo, scv);
             break;
-        case "socks"_hash:
+        case "socks5"_hash:
             group = SOCKS_DEFAULT_GROUP;
 
             singleproxy["username"] >>= user;
@@ -1067,9 +1083,15 @@ void explodeClash(Node yamlnode, const std::string &custom_port, std::vector<nod
             singleproxy["cipher"] >>= cipher;
             singleproxy["password"] >>= password;
             singleproxy["protocol"] >>= protocol;
-            singleproxy["protocolparam"] >>= protoparam;
             singleproxy["obfs"] >>= obfs;
-            singleproxy["obfsparam"] >>= obfsparam;
+            if(singleproxy["protocol-param"].IsDefined())
+                singleproxy["protocol-param"] >>= protoparam;
+            else
+                singleproxy["protocolparam"] >>= protoparam;
+            if(singleproxy["obfs-param"].IsDefined())
+                singleproxy["obfs-param"] >>= obfsparam;
+            else
+                singleproxy["obfsparam"] >>= obfsparam;
 
             node.linkType = SPEEDTEST_MESSAGE_FOUNDSSR;
             node.proxyStr = ssrConstruct(group, ps, base64_encode(ps), server, port, protocol, cipher, obfs, password, obfsparam, protoparam, ssr_libev, udp, tfo, scv);
@@ -1111,8 +1133,60 @@ void explodeClash(Node yamlnode, const std::string &custom_port, std::vector<nod
         node.port = to_int(port, 1);
         node.id = index;
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
+    return;
+}
+
+void explodeStdVMess(std::string vmess, const std::string &custom_port, nodeInfo &node)
+{
+    std::string add, port, type, id, aid, net, path, host, tls, remarks;
+    std::string addition;
+    vmess = vmess.substr(8);
+    string_size pos;
+
+    pos = vmess.rfind("#");
+    if(pos != vmess.npos)
+    {
+        remarks = UrlDecode(vmess.substr(pos + 1));
+        vmess.erase(pos);
+    }
+    const std::string stdvmess_matcher = R"(^([a-z]+)(?:\+([a-z]+))?:([\da-f]{4}(?:[\da-f]{4}-){4}[\da-f]{12})-(\d+)@(.+):(\d+)(?:\/?\?(.*))?$)";
+    if(regGetMatch(vmess, stdvmess_matcher, 8, 0, &net, &tls, &id, &aid, &add, &port, &addition))
+        return;
+
+    switch(hash_(net))
+    {
+    case "tcp"_hash:
+    case "kcp"_hash:
+        type = getUrlArg(addition, "type");
+        break;
+    case "http"_hash:
+    case "ws"_hash:
+        host = getUrlArg(addition, "host");
+        path = getUrlArg(addition, "path");
+        break;
+    case "quic"_hash:
+        type = getUrlArg(addition, "security");
+        host = getUrlArg(addition, "type");
+        path = getUrlArg(addition, "key");
+        break;
+    default:
+        return;
+    }
+
+    if(!custom_port.empty())
+        port = custom_port;
+    if(remarks.empty())
+        remarks = add + ":" + port;
+
+    node.linkType = SPEEDTEST_MESSAGE_FOUNDVMESS;
+    node.group = V2RAY_DEFAULT_GROUP;
+    node.remarks = remarks;
+    node.server = add;
+    node.port = to_int(port, 0);
+    node.proxyStr = vmessConstruct(node.group, remarks, add, port, type, id, aid, net, "auto", path, host, "", tls);
     return;
 }
 
@@ -1123,8 +1197,9 @@ void explodeShadowrocket(std::string rocket, const std::string &custom_port, nod
     std::string addition;
     rocket = rocket.substr(8);
 
-    addition = rocket.substr(rocket.find("?") + 1);
-    rocket = rocket.substr(0, rocket.find("?"));
+    string_size pos = rocket.find("?");
+    addition = rocket.substr(pos + 1);
+    rocket.erase(pos);
 
     if(regGetMatch(urlsafe_base64_decode(rocket), "(.*?):(.*)@(.*):(.*)", 5, 0, &cipher, &id, &add, &port))
         return;
@@ -1132,7 +1207,7 @@ void explodeShadowrocket(std::string rocket, const std::string &custom_port, nod
         port = custom_port;
     if(port == "0")
         return;
-    remarks = UrlDecode(getUrlArg(addition, "remark"));
+    remarks = UrlDecode(getUrlArg(addition, "remarks"));
     obfs = getUrlArg(addition, "obfs");
     if(obfs.size())
     {
@@ -1742,6 +1817,7 @@ bool explodeSurge(std::string surge, const std::string &custom_port, std::vector
         node.port = to_int(port);
         node.id = index;
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
     return index;
@@ -1808,6 +1884,7 @@ void explodeSSTap(std::string sstap, const std::string &custom_port, std::vector
         node.server = server;
         node.port = to_int(port, 1);
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
     }
 }
 
@@ -1830,26 +1907,43 @@ void explodeNetchConf(std::string netch, bool ss_libev, bool ssr_libev, const st
 
         node.id = index;
         nodes.emplace_back(std::move(node));
+        node = nodeInfo();
         index++;
     }
 }
+
+bool applyMatcher(const std::string &rule, std::string &real_rule, const nodeInfo &node);
 
 bool chkIgnore(const nodeInfo &node, string_array &exclude_remarks, string_array &include_remarks)
 {
     bool excluded = false, included = false;
     //std::string remarks = UTF8ToACP(node.remarks);
-    std::string remarks = node.remarks;
+    //std::string remarks = node.remarks;
     //writeLog(LOG_TYPE_INFO, "Comparing exclude remarks...");
-    excluded = std::any_of(exclude_remarks.cbegin(), exclude_remarks.cend(), [&remarks](const auto &x)
+    excluded = std::any_of(exclude_remarks.cbegin(), exclude_remarks.cend(), [&node](const auto &x)
     {
-        return regFind(remarks, x);
+        std::string real_rule;
+        if(applyMatcher(x, real_rule, node))
+        {
+            if(real_rule.empty()) return true;
+            return regFind(node.remarks, real_rule);
+        }
+        else
+            return false;
     });
     if(include_remarks.size() != 0)
     {
         //writeLog(LOG_TYPE_INFO, "Comparing include remarks...");
-        included = std::any_of(include_remarks.cbegin(), include_remarks.cend(), [&remarks](const auto &x)
+        included = std::any_of(include_remarks.cbegin(), include_remarks.cend(), [&node](const auto &x)
         {
-            return regFind(remarks, x);
+            std::string real_rule;
+            if(applyMatcher(x, real_rule, node))
+            {
+                if(real_rule.empty()) return true;
+                return regFind(node.remarks, real_rule);
+            }
+            else
+                return false;
         });
     }
     else
@@ -1922,7 +2016,7 @@ int explodeConfContent(const std::string &content, const std::string &custom_por
         return SPEEDTEST_ERROR_NONE;
 }
 
-void explode(std::string link, bool sslibev, bool ssrlibev, const std::string &custom_port, nodeInfo &node)
+void explode(const std::string &link, bool sslibev, bool ssrlibev, const std::string &custom_port, nodeInfo &node)
 {
     // TODO: replace strFind with startsWith if appropriate
     if(strFind(link, "ssr://"))
@@ -1973,6 +2067,7 @@ void explodeSub(std::string sub, bool sslibev, bool ssrlibev, const std::string 
     }
     catch (std::exception &e)
     {
+        writeLog(0, e.what(), LOG_LEVEL_DEBUG);
         //ignore
     }
 
@@ -1985,7 +2080,7 @@ void explodeSub(std::string sub, bool sslibev, bool ssrlibev, const std::string 
     //try to parse as normal subscription
     if(!processed)
     {
-        sub = urlsafe_base64_decode(trim(sub));
+        sub = urlsafe_base64_decode(sub);
         if(regFind(sub, "(vmess|shadowsocks|http|trojan)\\s*?="))
         {
             if(explodeSurge(sub, custom_port, nodes, sslibev))
@@ -2004,6 +2099,7 @@ void explodeSub(std::string sub, bool sslibev, bool ssrlibev, const std::string 
                 continue;
             }
             nodes.emplace_back(std::move(node));
+            node = nodeInfo();
         }
     }
 }
@@ -2012,7 +2108,6 @@ void filterNodes(std::vector<nodeInfo> &nodes, string_array &exclude_remarks, st
 {
     int node_index = 0;
     std::vector<nodeInfo>::iterator iter = nodes.begin();
-    /*
     while(iter != nodes.end())
     {
         if(chkIgnore(*iter, exclude_remarks, include_remarks))
@@ -2029,9 +2124,7 @@ void filterNodes(std::vector<nodeInfo> &nodes, string_array &exclude_remarks, st
             ++iter;
         }
     }
-    */
-
-    bool excluded, included;
+    /*
     std::vector<std::unique_ptr<pcre2_code, decltype(&pcre2_code_free)>> exclude_patterns, include_patterns;
     std::vector<std::unique_ptr<pcre2_match_data, decltype(&pcre2_match_data_free)>> exclude_match_data, include_match_data;
     unsigned int i = 0;
@@ -2061,8 +2154,7 @@ void filterNodes(std::vector<nodeInfo> &nodes, string_array &exclude_remarks, st
     writeLog(LOG_TYPE_INFO, "Filter started.");
     while(iter != nodes.end())
     {
-        excluded = false;
-        included = false;
+        bool excluded = false, included = false;
         for(i = 0; i < exclude_patterns.size(); i++)
         {
             rc = pcre2_match(exclude_patterns[i].get(), reinterpret_cast<const unsigned char*>(iter->remarks.c_str()), iter->remarks.size(), 0, 0, exclude_match_data[i].get(), NULL);
@@ -2108,6 +2200,7 @@ void filterNodes(std::vector<nodeInfo> &nodes, string_array &exclude_remarks, st
             ++iter;
         }
     }
+    */
     writeLog(LOG_TYPE_INFO, "Filter done.");
 }
 
